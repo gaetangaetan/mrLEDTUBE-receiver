@@ -27,37 +27,41 @@ void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
   digitalWrite(LED_BUILTIN,LOW);
   delay(100);
   digitalWrite(LED_BUILTIN,HIGH);
+  Serial.println("data received");
   //delay(incomingMessage.data); 
 }
 
 
 void setup() {
 pinMode(LED_BUILTIN,OUTPUT);
-Serial.begin(115200);
-Serial.println("!!! START !!!! mrLEDTUBE receiver");
-delay(1000);
-  WiFi.disconnect(); 
+  Serial.begin(115200);
+  WiFi.disconnect();
   ESP.eraseConfig();
- if (esp_now_init() != 0) {
-    Serial.println("Error initializing ESP-NOW");
+ 
+  // Wifi STA Mode
+  WiFi.mode(WIFI_STA);
+  // Get Mac Add
+  Serial.print("Mac Address: ");
+  Serial.print(WiFi.macAddress());
+  Serial.println("\nESP-Now Receiver");
+  
+  // Initializing the ESP-NOW
+  if (esp_now_init() != 0) {
+    Serial.println("Problem during ESP-NOW init");
     return;
   }
-   // Set device as a Wi-Fi Station
-  WiFi.mode(WIFI_STA);
-
-esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
+  
+  //esp_now_set_self_role(ESP_NOW_ROLE_SLAVE);
+  // We can register the receiver callback function
+  esp_now_register_recv_cb(OnDataRecv);
+// esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
 // REPLACE WITH RECEIVER MAC Address
 uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 uint8_t mrDMXRECEIVERAddress[] = {0x3C, 0x61, 0x05, 0xD1, 0xCC, 0x57};
   // Register peer
-  esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_COMBO, 1, NULL, 0);
+  //esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_COMBO, 1, NULL, 0);
 
-    // Register for a callback function that will be called when data is sent
-  esp_now_register_send_cb(OnDataSent);
   
-  // Register for a callback function that will be called when data is received
-  esp_now_register_recv_cb(OnDataRecv);
-
 }
 
 void loop() {
