@@ -1,5 +1,9 @@
 // test git 3
 #include <Arduino.h>
+#include <EEPROM.h>
+
+#define EEPROM_SIZE 32
+
 #include <FastLED.h>
 
 // For led chips like WS2812, which have a data line, ground, and power, you just
@@ -7,7 +11,7 @@
 // ground, and power), like the LPD8806 define both DATA_PIN and CLOCK_PIN
 // Clock pin only needed for SPI based chipsets when not using hardware SPI
 #define DATA_PIN D2
-#define CLOCK_PIN D1
+
 
 // Define the array of leds
 #define MAXLEDLENGTH 10
@@ -18,7 +22,7 @@ CRGB leds[MAXLEDLENGTH];
 // TM1637Display display(D7, D6); // clck DIO
 
 #include "OneButton.h"
-OneButton button1(D6, true);
+OneButton button1(D1, true);
 // Setup a new OneButton on pin D6.  
 
 
@@ -81,21 +85,7 @@ void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
   {
     dmxChannels[(packetNumber*128)+i]=incomingDMXPacket.dmxvalues[i];
   }
-  //  Serial.print(incomingDMXMessage.dmx001);
-  //  Serial.print(" ");
-  //  Serial.print(incomingDMXMessage.dmx002);
-  //  Serial.print(" ");
-  //  Serial.print(incomingDMXMessage.dmx003);
-  //  Serial.print(" ");
-  //  Serial.print(incomingDMXMessage.dmx004);
-  //  Serial.println(" ");
-   //delay(50);
-
-  // digitalWrite(LED_BUILTIN,LOW);
-  // delay(100);
-  // digitalWrite(LED_BUILTIN,HIGH);
-  // Serial.println("data received");
-  //delay(incomingMessage.data); 
+ 
 }
 
 void DMX2LEDSTRIP()
@@ -246,30 +236,42 @@ default:
 
 // ----- button 1 callback functions
 
-// This function will be called when the button1 was pressed 1 time (and no 2. button press followed).
-void click1() {
-  Serial.print("click - setuptubenumber = ");
-  Serial.println(setupTubeNumber);
+void click1() {//incrémente le numéro de groupe  
    if(etat==RUNNING)return; // en mode RUNNING, on ignore cette action
    setupTubeNumber=(setupTubeNumber+1)%10;
 
-} // click1
+} 
 
 void longPressStart1() {
-  Serial.print("longpress - etat = ");
-  Serial.println(etat);
+  Serial.print("longpress | etat = ");
+  Serial.println((etat?"RUNNING":"SETUP"));
+
+  if(etat==SETUP) // avant de sortir du SETUP, on enregistre les données en mémoire persistante
+  {    
+    EEPROM.write(0,setupAddress);
+    EEPROM.write(4,setupMode);
+    EEPROM.write(8,setupTubeNumber);
+    Serial.print("Commit =  ");
+    Serial.println(EEPROM.commit());
+    
+  }
+  
   etat=!etat; // on passe de RUNNING à SETUP ou inversement
+
+
+
+
 
 }
 
 void setup() {
 
-    // link the button 1 functions.
+    // link the button 1 functions.    
   button1.attachClick(click1);
   button1.attachLongPressStart(longPressStart1);
-  
 
-pinMode(LED_BUILTIN,OUTPUT);
+  
+  pinMode(LED_BUILTIN,OUTPUT);
   Serial.begin(115200);
   WiFi.disconnect();
   ESP.eraseConfig();
@@ -287,13 +289,32 @@ pinMode(LED_BUILTIN,OUTPUT);
     return;
   }
   
+EEPROM.begin(EEPROM_SIZE);
+uint eeAddress=0;
+
+setupAddress = EEPROM.read(0);
+setupMode = EEPROM.read(4);
+setupTubeNumber = EEPROM.read(8);
+if((setupAddress<1)||(setupAddress>255))setupAddress=1;
+if((setupMode<1)||(setupMode>255))setupMode=1;
+if((setupTubeNumber<0)||(setupTubeNumber>32))setupTubeNumber=0;
+
+//EEPROM.end();
+
+Serial.print(" ");
+Serial.print("Paramètres récupérés en EEPROM : Addresse = ");
+Serial.print(setupAddress);
+Serial.print(" | Mode = ");
+Serial.print(setupMode);
+Serial.print(" | Tube Group = ");
+Serial.println(setupTubeNumber);
   //esp_now_set_self_role(ESP_NOW_ROLE_SLAVE);
   // We can register the receiver callback function
   esp_now_register_recv_cb(OnDataRecv);
 // esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
 // REPLACE WITH RECEIVER MAC Address
-uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-uint8_t mrDMXRECEIVERAddress[] = {0x3C, 0x61, 0x05, 0xD1, 0xCC, 0x57};
+// uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+// uint8_t mrDMXRECEIVERAddress[] = {0x3C, 0x61, 0x05, 0xD1, 0xCC, 0x57};
   // Register peer
   //esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_COMBO, 1, NULL, 0);
 
@@ -301,6 +322,8 @@ uint8_t mrDMXRECEIVERAddress[] = {0x3C, 0x61, 0x05, 0xD1, 0xCC, 0x57};
 }
 
 void loop() {
+  button1.tick();
+
   if(etat==RUNNING)
   {
     DMX2LEDSTRIP();
@@ -310,13 +333,14 @@ void loop() {
     FastLED.clear();
     for(int j=0;j<setupTubeNumber;j++)
     {
-      leds[j].r=255;
-      leds[j].g=255;
-      leds[j].b=255;
+      leds[j].r=0;
+      leds[j].g=150;
+      leds[j].b=0;
     }
     FastLED.show();
     delay(100);
     FastLED.clear();
+    FastLED.show();
     delay(100);
   }
 
