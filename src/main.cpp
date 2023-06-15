@@ -295,7 +295,7 @@ uint eeAddress=0;
 setupAddress = EEPROM.read(0);
 setupMode = EEPROM.read(4);
 setupTubeNumber = EEPROM.read(8);
-if((setupAddress<1)||(setupAddress>255))setupAddress=1;
+if((setupAddress<1)||(setupAddress>512))setupAddress=1;
 if((setupMode<1)||(setupMode>255))setupMode=1;
 if((setupTubeNumber<0)||(setupTubeNumber>32))setupTubeNumber=0;
 
