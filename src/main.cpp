@@ -1,4 +1,20 @@
-// test git 3
+/* version fonctionnelle du 15 06 2023
+D1 bouton
+D2 datapin LED strip
+D5 GND bouton
+75 LEDs
+Mode 0 : 123 RGB for all strip at once
+Mode 1 : 123 RGB + 4 LENGTH + 5 OFFSET    
+Mode 2 : 123 RGB + 4 LENGTH + 5 OFFSET tapered
+Mode 3 : 123 RGB + 4 LENGTH + 5 OFFSET + 6 OFFSET TUBE  
+Mode 4 : 123 RGB + 4 LENGTH + 5 OFFSET + 6 OFFSET TUBE (tapered)
+Mode 5 : individual rgb 123 456 ...
+
+SETUP (clic long pour y accéder ou en sortir) : réglage du numéro de groupe
+Le nombre de LEDS correspondant au numéro de groupe clignote
+Le numéro de groupe est enregistré en EEPROM
+*/ 
+
 #include <Arduino.h>
 #include <EEPROM.h>
 
@@ -14,7 +30,7 @@
 
 
 // Define the array of leds
-#define MAXLEDLENGTH 10
+#define MAXLEDLENGTH 75
 CRGB leds[MAXLEDLENGTH];
 
 
@@ -33,7 +49,6 @@ OneButton button1(D1, true);
 
 int setupAddress = 1;
 int setupMode = 1;
-int setupLength = 10;
 int setupTubeNumber = 1;
 
 #define RUNNING true
@@ -105,7 +120,7 @@ int ledoffset = 0;
 switch (setupMode)
 {
 case 0 : // 123 RGB for all strip at once
-  for(int j=0;j<  setupLength;j++)
+  for(int j=0;j<  MAXLEDLENGTH;j++)
   {
       leds[j].r=dmxChannels[1];  
       leds[j].g=dmxChannels[2];  
@@ -214,7 +229,7 @@ case 0 : // 123 RGB for all strip at once
   
 
   case 5 : // individual rgb 123 456 ...
-  for(int j=0;j<setupLength*3;j+=3)
+  for(int j=0;j<MAXLEDLENGTH*3;j+=3)
   {
       leds[j/3].r=dmxChannels[ledoffset+j+1];  
       leds[j/3].g=dmxChannels[ledoffset+j+2];  
@@ -265,6 +280,9 @@ void longPressStart1() {
 }
 
 void setup() {
+  // on utilise D5 comme GND pour le bouton 1
+  pinMode(D5,OUTPUT);
+  digitalWrite(D5,LOW);
 
     // link the button 1 functions.    
   button1.attachClick(click1);
