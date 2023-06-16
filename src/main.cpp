@@ -1,4 +1,6 @@
-/* version fonctionnelle du 15 06 2023
+// version artnet en cours
+
+/* basée sur version fonctionnelle du 15 06 2023
 D1 bouton
 D2 datapin LED strip
 D5 GND bouton
@@ -17,6 +19,12 @@ Le numéro de groupe est enregistré en EEPROM
 
 #include <Arduino.h>
 #include <EEPROM.h>
+#include <ESP8266WiFi.h>          //https://github.com/esp8266/Arduino
+
+//needed for library
+#include <DNSServer.h>
+#include <ESP8266WebServer.h>
+#include <WiFiManager.h>         //https://github.com/tzapu/WiFiManager
 
 #define EEPROM_SIZE 32
 
@@ -280,6 +288,14 @@ void longPressStart1() {
 }
 
 void setup() {
+  if(digitalRead(D1))
+  {
+    Serial.println("bouton OFF");
+  }
+  else
+  {
+    Serial.println("bouton OFF");
+  }
   // on utilise D5 comme GND pour le bouton 1
   pinMode(D5,OUTPUT);
   digitalWrite(D5,LOW);
