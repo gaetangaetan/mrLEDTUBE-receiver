@@ -3,12 +3,12 @@ D1 bouton
 D2 datapin LED strip
 D5 GND bouton
 75 LEDs
-Mode 0 : 123 RGB for all strip at once
-Mode 1 : 123 RGB + 4 LENGTH + 5 OFFSET    
-Mode 2 : 123 RGB + 4 LENGTH + 5 OFFSET tapered
-Mode 3 : 123 RGB + 4 LENGTH + 5 OFFSET + 6 OFFSET TUBE  
-Mode 4 : 123 RGB + 4 LENGTH + 5 OFFSET + 6 OFFSET TUBE (tapered)
-Mode 5 : individual rgb 123 456 ...
+Mode 0 : 234 RGB for all strip at once
+Mode 1 : 234 RGB + 5 LENGTH + 6 OFFSET    
+Mode 2 : 234 RGB + 5 LENGTH + 6 OFFSET tapered
+Mode 3 : 234 RGB + 5 LENGTH + 6 OFFSET + 7 OFFSET TUBE  
+Mode 4 : 234 RGB + 5 LENGTH + 6 OFFSET + 7 OFFSET TUBE (tapered)
+Mode 5 : individual rgb 234 567 ...
 
 SETUP (clic long pour y accéder ou en sortir) : réglage du numéro de groupe
 Le nombre de LEDS correspondant au numéro de groupe clignote
