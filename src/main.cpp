@@ -25,8 +25,17 @@ Le numéro de groupe est enregistré en EEPROM
 #include <DNSServer.h>
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h>         //https://github.com/tzapu/WiFiManager
+WiFiManager wifiManager;
+#define APNAME "mrLEDTUBE1"
+
+#include <ArtnetWifi.h>
+WiFiUDP UdpSend;
+ArtnetWifi artnet;
 
 #define EEPROM_SIZE 32
+#define DMXMODE true
+#define ARTNETMODE false
+bool runningMode = DMXMODE;
 
 #include <FastLED.h>
 
@@ -39,6 +48,7 @@ Le numéro de groupe est enregistré en EEPROM
 
 // Define the array of leds
 #define MAXLEDLENGTH 75
+//#define MAXLEDLENGTH 10 // en mode programmation quand le ledstrip est alimenté via l'ESP, on se limite à 10 leds (pour ne pas le brûler)
 CRGB leds[MAXLEDLENGTH];
 
 
@@ -288,25 +298,22 @@ void longPressStart1() {
 }
 
 void setup() {
-  if(digitalRead(D1))
-  {
-    Serial.println("bouton OFF");
-  }
-  else
-  {
-    Serial.println("bouton OFF");
-  }
-  // on utilise D5 comme GND pour le bouton 1
-  pinMode(D5,OUTPUT);
-  digitalWrite(D5,LOW);
-
-    // link the button 1 functions.    
-  button1.attachClick(click1);
-  button1.attachLongPressStart(longPressStart1);
-
-  
-  pinMode(LED_BUILTIN,OUTPUT);
   Serial.begin(115200);
+
+
+  pinMode(D5,OUTPUT);
+  digitalWrite(D5,LOW);// on utilise D5 comme GND pour le bouton 1
+  
+  FastLED.addLeds<WS2812, DATA_PIN, GRB>(leds, MAXLEDLENGTH);  // GRB ordering is typical  
+
+  if(digitalRead(D1))// démarrage en mode DMX
+  {
+    runningMode = DMXMODE;
+    Serial.println("RUNNING MODE = DMX");
+    
+
+    //pinMode(LED_BUILTIN,OUTPUT);
+  
   WiFi.disconnect();
   ESP.eraseConfig();
  
@@ -318,13 +325,60 @@ void setup() {
   Serial.println("\nESP-Now Receiver");
   
   // Initializing the ESP-NOW
-  if (esp_now_init() != 0) {
+   if (esp_now_init() != 0) {
     Serial.println("Problem during ESP-NOW init");
     return;
+     }
+
+    esp_now_register_recv_cb(OnDataRecv);
+
+  }
+  else // démarrage en mode ArtNet
+  {
+    runningMode = ARTNETMODE;
+    Serial.println("RUNNING MODE = ARTNET");
+
+     FastLED.clear();
+    for(int j=0;j<3;j++)
+    {
+      leds[j].r=0;
+      leds[j].g=150;
+      leds[j].b=0;
+    }
+    FastLED.show();
+    delay(2000);
+    
+    if(digitalRead(D1)) // si on relache le bouton : autoConnect
+    {
+      wifiManager.autoConnect(APNAME);
+    }
+    else // si on maintient le bouton : choix du réseau wifi
+    {
+      for(int j=0;j<6;j++)
+      {
+      leds[j].r=0;
+      leds[j].g=150;
+      leds[j].b=0;
+      }
+      FastLED.show();
+      wifiManager.startConfigPortal(APNAME,NULL);
+    }
+
+    
+    
   }
   
+  
+
+    // link the button 1 functions.    
+  button1.attachClick(click1);
+  button1.attachLongPressStart(longPressStart1);
+
+  
+  
+  
 EEPROM.begin(EEPROM_SIZE);
-uint eeAddress=0;
+//uint eeAddress=0;
 
 setupAddress = EEPROM.read(0);
 setupMode = EEPROM.read(4);
@@ -342,25 +396,33 @@ Serial.print(" | Mode = ");
 Serial.print(setupMode);
 Serial.print(" | Tube Group = ");
 Serial.println(setupTubeNumber);
-  //esp_now_set_self_role(ESP_NOW_ROLE_SLAVE);
-  // We can register the receiver callback function
-  esp_now_register_recv_cb(OnDataRecv);
-// esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
-// REPLACE WITH RECEIVER MAC Address
-// uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-// uint8_t mrDMXRECEIVERAddress[] = {0x3C, 0x61, 0x05, 0xD1, 0xCC, 0x57};
-  // Register peer
-  //esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_COMBO, 1, NULL, 0);
 
-  FastLED.addLeds<WS2812, DATA_PIN, GRB>(leds, MAXLEDLENGTH);  // GRB ordering is typical  
+  
+
+
+  
+
+   artnet.setArtDmxFunc([](DMX_FUNC_PARAM){
+  
+  for(int i=0;i<length;i++)
+  {
+    dmxChannels[i]=data[i];
+  }
+
+  
+  });
+
+  artnet.begin();
 }
 
 void loop() {
   button1.tick();
 
+  
   if(etat==RUNNING)
-  {
-    DMX2LEDSTRIP();
+  {    
+    if(runningMode==ARTNETMODE)artnet.read();
+    DMX2LEDSTRIP();  
   }
   else // etat==SETUP -> on fait clignoter un nombre de LEDs correspondant au groupe du tube
   {
