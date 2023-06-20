@@ -47,7 +47,7 @@ bool runningMode = DMXMODE;
 
 
 // Define the array of leds
-#define MAXLEDLENGTH 75
+#define MAXLEDLENGTH 144
 //#define MAXLEDLENGTH 10 // en mode programmation quand le ledstrip est alimenté via l'ESP, on se limite à 10 leds (pour ne pas le brûler)
 CRGB leds[MAXLEDLENGTH];
 
@@ -62,8 +62,8 @@ OneButton button1(D1, true);
 
 #include <ESP8266WiFiMulti.h>
 #include <espnow.h>
-// 1 DMX RECEIVER : 3C:61:05:D1:CC:57 / COM17 serial …BIA
-// 2 mrLEDTUBE : 3C:61:05:D3:19:32  COM18 serial 7
+// 1 DMX RECEIVER : 3C:61:05:D1:CC:57 
+// 2 mrLEDTUBE : 3C:61:05:D3:19:32 
 
 int setupAddress = 1;
 int setupMode = 1;
