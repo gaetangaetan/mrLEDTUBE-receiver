@@ -21,12 +21,16 @@ Le numéro de groupe est enregistré en EEPROM
 #include <EEPROM.h>
 #include <ESP8266WiFi.h>          //https://github.com/esp8266/Arduino
 
+#include <ESP8266HTTPClient.h>
+#include <ESP8266httpUpdate.h>
+
 //needed for library
 #include <DNSServer.h>
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h>         //https://github.com/tzapu/WiFiManager
 WiFiManager wifiManager;
 #define APNAME "mrLEDTUBE1"
+#define VERSION 11
 
 #include <ArtnetWifi.h>
 WiFiUDP UdpSend;
@@ -119,6 +123,101 @@ void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
     dmxChannels[(packetNumber*128)+i]=incomingDMXPacket.dmxvalues[i];
   }
  
+}
+
+void update_started() {
+  Serial.println("CALLBACK:  HTTP update process started");
+  
+}
+
+void update_finished() {
+  
+  Serial.println("CALLBACK:  HTTP update process finished");
+}
+
+void update_progress(int cur, int total) {
+  float progress = cur/total;
+  FastLED.clear();
+    for(int j=0;j<(progress*MAXLEDLENGTH);j++)
+    {
+      leds[j].r=0;
+      leds[j].g=0;
+      leds[j].b=150;
+    }
+    FastLED.show();
+  Serial.printf("CALLBACK:  HTTP update process at %d of %d bytes...\n", cur, total);
+}
+
+void update_error(int err) {
+  FastLED.clear();
+    for(int j=0;j<MAXLEDLENGTH;j++)
+    {
+      leds[j].r=150;
+      leds[j].g=0;
+      leds[j].b=0;
+    }
+    
+    FastLED.show();
+  
+  Serial.printf("CALLBACK:  HTTP update fatal error code %d\n", err);
+}
+
+void updateFirmware()
+{
+
+  ESPhttpUpdate.setClientTimeout(2000);  // default was 8000
+  
+  if ((WiFi.status() == WL_CONNECTED)) {
+
+    WiFiClient client;
+
+    // The line below is optional. It can be used to blink the LED on the board during flashing
+    // The LED will be on during download of one buffer of data from the network. The LED will
+    // be off during writing that buffer to flash
+    // On a good connection the LED should flash regularly. On a bad connection the LED will be
+    // on much longer than it will be off. Other pins than LED_BUILTIN may be used. The second
+    // value is used to put the LED on. If the LED is on with HIGH, that value should be passed
+    ESPhttpUpdate.setLedPin(LED_BUILTIN, LOW);
+
+    // Add optional callback notifiers
+    ESPhttpUpdate.onStart(update_started);
+    ESPhttpUpdate.onEnd(update_finished);
+    ESPhttpUpdate.onProgress(update_progress);
+    ESPhttpUpdate.onError(update_error);
+
+    t_httpUpdate_return ret = ESPhttpUpdate.update(client, "http://mrledtubefirmware.gaetanstreel.com/firmware.bin");
+    // Or:
+    // t_httpUpdate_return ret = ESPhttpUpdate.update(client, "server", 80, "file.bin");
+
+    switch (ret) {
+      case HTTP_UPDATE_FAILED: Serial.printf("HTTP_UPDATE_FAILD Error (%d): %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str()); 
+                FastLED.clear();
+        for(int j=0;j<MAXLEDLENGTH;j++)
+        {
+          leds[j].r=150;
+          leds[j].g=0;
+          leds[j].b=0;
+        }    
+        FastLED.show();
+        delay(2000);
+        break;
+
+      case HTTP_UPDATE_NO_UPDATES: Serial.println("HTTP_UPDATE_NO_UPDATES"); break;
+
+      case HTTP_UPDATE_OK: Serial.println("HTTP_UPDATE_OK"); 
+          FastLED.clear();
+        for(int j=0;j<MAXLEDLENGTH;j++)
+        {
+          leds[j].r=0;
+          leds[j].g=150;
+          leds[j].b=0;
+        }    
+        FastLED.show();
+        delay(2000);
+      break;
+    }
+  }
+  
 }
 
 void DMX2LEDSTRIP()
@@ -297,14 +396,41 @@ void longPressStart1() {
 
 }
 
+void ledProgress(int count, int blinkspeed)
+{
+
+  for (int i = 0; i < count; i++)
+  {
+    FastLED.clear();
+    FastLED.show();
+    delay(blinkspeed);
+
+    leds[i].r = 200;
+    leds[i].g = 0;
+    leds[i].b = 20;
+
+    FastLED.show();
+    delay(blinkspeed);
+  }
+}
+
 void setup() {
+
+  
   Serial.begin(115200);
+  Serial.println("");
+  Serial.print("Version ");
+  Serial.println(VERSION);
 
 
   pinMode(D5,OUTPUT);
   digitalWrite(D5,LOW);// on utilise D5 comme GND pour le bouton 1
   
   FastLED.addLeds<WS2812, DATA_PIN, GRB>(leds, MAXLEDLENGTH);  // GRB ordering is typical  
+
+  // affichage de la version (blink)
+  //ledProgress(VERSION,100);
+
 
   if(digitalRead(D1))// démarrage en mode DMX (on n'appuye pas sur le bouton au démarrage)
   {
@@ -343,10 +469,10 @@ void setup() {
     {
       leds[j].r=0;
       leds[j].g=150;
-      leds[j].b=0;
+      leds[j].b=150;
     }
     FastLED.show();
-    delay(2000);
+    delay(3000);
     
     if(digitalRead(D1)) // si on relache le bouton : autoConnect
     {
@@ -364,6 +490,9 @@ void setup() {
       wifiManager.startConfigPortal(APNAME,NULL);
     }
 
+    updateFirmware();
+
+  //  delay(5000);
     
     
   }
