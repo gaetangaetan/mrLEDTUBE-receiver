@@ -306,7 +306,7 @@ void setup() {
   
   FastLED.addLeds<WS2812, DATA_PIN, GRB>(leds, MAXLEDLENGTH);  // GRB ordering is typical  
 
-  if(digitalRead(D1))// démarrage en mode DMX
+  if(digitalRead(D1))// démarrage en mode DMX (on n'appuye pas sur le bouton au démarrage)
   {
     runningMode = DMXMODE;
     Serial.println("RUNNING MODE = DMX");
@@ -333,7 +333,7 @@ void setup() {
     esp_now_register_recv_cb(OnDataRecv);
 
   }
-  else // démarrage en mode ArtNet
+  else // démarrage en mode ArtNet (le bouton est enfoncé au démarrage)
   {
     runningMode = ARTNETMODE;
     Serial.println("RUNNING MODE = ARTNET");
