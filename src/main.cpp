@@ -30,7 +30,7 @@ Le numéro de groupe est enregistré en EEPROM
 #include <WiFiManager.h>         //https://github.com/tzapu/WiFiManager
 WiFiManager wifiManager;
 #define APNAME "mrLEDTUBE12"
-#define VERSION 12
+#define VERSION 13
 
 #include <ArtnetWifi.h>
 WiFiUDP UdpSend;
@@ -465,7 +465,7 @@ void setup() {
     Serial.println("RUNNING MODE = ARTNET");
 
      FastLED.clear();
-    for(int j=0;j<3;j++)
+    for(int j=0;j<10;j++)
     {
       leds[j].r=0;
       leds[j].g=150;
@@ -476,11 +476,12 @@ void setup() {
     
     if(digitalRead(D1)) // si on relache le bouton : autoConnect
     {
-      wifiManager.autoConnect(APNAME);
-    }
+      //wifiManager.autoConnect(APNAME);
+      wifiManager.autoConnect();
+            }
     else // si on maintient le bouton : choix du réseau wifi
     {
-      for(int j=0;j<6;j++)
+      for(int j=0;j<15;j++)
       {
       leds[j].r=0;
       leds[j].g=150;
@@ -488,9 +489,10 @@ void setup() {
       }
       FastLED.show();
       wifiManager.startConfigPortal(APNAME,NULL);
+      updateFirmware();
     }
 
-    updateFirmware();
+    
 
   //  delay(5000);
     
