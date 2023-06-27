@@ -29,8 +29,8 @@ Le numéro de groupe est enregistré en EEPROM
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h>         //https://github.com/tzapu/WiFiManager
 WiFiManager wifiManager;
-#define APNAME "mrLEDTUBE1"
-#define VERSION 11
+#define APNAME "mrLEDTUBE12"
+#define VERSION 12
 
 #include <ArtnetWifi.h>
 WiFiUDP UdpSend;
@@ -136,9 +136,9 @@ void update_finished() {
 }
 
 void update_progress(int cur, int total) {
-  float progress = cur/total;
+  int progress = (MAXLEDLENGTH*cur)/total;
   FastLED.clear();
-    for(int j=0;j<(progress*MAXLEDLENGTH);j++)
+    for(int j=0;j<progress;j++)
     {
       leds[j].r=0;
       leds[j].g=0;
