@@ -11,6 +11,9 @@ Mode 2 : 234 RGB + 5 LENGTH + 6 OFFSET tapered
 Mode 3 : 234 RGB + 5 LENGTH + 6 OFFSET + 7 OFFSET TUBE  
 Mode 4 : 234 RGB + 5 LENGTH + 6 OFFSET + 7 OFFSET TUBE (tapered)
 Mode 5 : individual rgb 234 567 ...
+Mode 6 : RGB séparé pour chaque groupe : 234 RGB GRP0, 567 RGB GRP1, 8910 RGB GRP2, ...
+
+Mode 255 : on affiche le numéro du groupe (0 à 10)
 
 SETUP (clic long pour y accéder ou en sortir) : réglage du numéro de groupe
 Le nombre de LEDS correspondant au numéro de groupe clignote
@@ -233,10 +236,14 @@ int ledlength;
 double ledDimmer;
 double ledDimmerIncrement;
 
+  int ir = 3*setupTubeNumber + 1;
+  int ig = 3*setupTubeNumber + 2;
+  int ib = 3*setupTubeNumber + 3;
+
 int ledoffset = 0;
 switch (setupMode)
 {
-case 0 : // 123 RGB for all strip at once
+case 0 : // 234 RGB for all strip at once
   for(int j=0;j<  MAXLEDLENGTH;j++)
   {
       leds[j].r=dmxChannels[1];  
@@ -245,7 +252,7 @@ case 0 : // 123 RGB for all strip at once
   }
   break;
 
-  case 1 : // 123 RGB + 4 LENGTH + 5 OFFSET    
+  case 1 : // 234 RGB + 5 LENGTH + 6 OFFSET    
     ledlength = dmxChannels[4];
     ledoffset = dmxChannels[5];
     ledstart = ledoffset-ledlength;    
@@ -261,7 +268,7 @@ case 0 : // 123 RGB for all strip at once
       }
   break;
 
-    case 2 : // 123 RGB + 4 LENGTH + 5 OFFSET tapered
+    case 2 : // 234 RGB + 5 LENGTH + 6 OFFSET tapered
     ledlength = dmxChannels[4];
     ledoffset = dmxChannels[5];
     ledstart = ledoffset-ledlength;    
@@ -294,7 +301,7 @@ case 0 : // 123 RGB for all strip at once
       }
   break;
 
-  case 3 : // 123 RGB + 4 LENGTH + 5 OFFSET + 6 OFFSET TUBE  
+  case 3 : // 234 RGB + 5 LENGTH + 6 OFFSET + 7 OFFSET TUBE  
     ledlength = dmxChannels[4];
     ledoffset = dmxChannels[5]+(dmxChannels[6]*setupTubeNumber);
     ledstart = ledoffset-ledlength;    
@@ -310,7 +317,7 @@ case 0 : // 123 RGB for all strip at once
       }
   break;
 
-  case 4 : // 123 RGB + 4 LENGTH + 5 OFFSET + 6 OFFSET TUBE (tapered)
+  case 4 : // 234 RGB + 5 LENGTH + 66 OFFSET + 7 OFFSET TUBE (tapered)
     ledlength = dmxChannels[4];
     ledoffset = dmxChannels[5]+(dmxChannels[6]*setupTubeNumber);
     ledstart = ledoffset-ledlength;    
@@ -345,12 +352,30 @@ case 0 : // 123 RGB for all strip at once
 
   
 
-  case 5 : // individual rgb 123 456 ...
+  case 5 : // individual rgb 234 567 ...
   for(int j=0;j<MAXLEDLENGTH*3;j+=3)
   {
       leds[j/3].r=dmxChannels[ledoffset+j+1];  
       leds[j/3].g=dmxChannels[ledoffset+j+2];  
       leds[j/3].b=dmxChannels[ledoffset+j+3];        
+  }
+  break;
+
+  case 6 : // individual rgb for each tubegroup 234 567 ...
+  for(int j=0;j<MAXLEDLENGTH*3;j+=3)
+  {
+      leds[j/3].r=dmxChannels[ir];  
+      leds[j/3].g=dmxChannels[ig];  
+      leds[j/3].b=dmxChannels[ib];        
+  }
+  break;
+
+   case 255 : // affichage du numéro de groupe
+  for(int j=0;j<setupTubeNumber;j++)
+  {
+      leds[10*j].r=255;
+      leds[10*j].g=0;
+      leds[10*j].b=0;
   }
   break;
 
@@ -495,8 +520,23 @@ void setup() {
       }
       if (WiFi.status() != WL_CONNECTED)
       {
-          wifiManager.autoConnect();
+         String ssid = "ESP" + String(ESP.getChipId());
+      
+          wifiManager.autoConnect(ssid.c_str(), NULL);
       }
+
+      // affichage leds jaune, 
+      for(int j=0;j<30;j++)
+      {
+      leds[j].r=250;
+      leds[j].g=100;
+      leds[j].b=0;
+      }
+      FastLED.show();
+      delay(2000);
+      // si on appuye sur le bouton -> update firmware
+      if(!digitalRead(D1))updateFirmware();
+
     }
     else // si on maintient le bouton : choix du réseau wifi
     {
@@ -577,10 +617,10 @@ void loop() {
   else // etat==SETUP -> on fait clignoter un nombre de LEDs correspondant au groupe du tube
   {
     FastLED.clear();
-    for(int j=1;j<=setupTubeNumber;j++)
+    for(int j=1;j<=10*setupTubeNumber;j+=10)
     {
       leds[j].r=0;
-      leds[j].g=150;
+      leds[j].g=250;
       leds[j].b=0;
     }
     FastLED.show();
