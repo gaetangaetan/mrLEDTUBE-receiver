@@ -30,7 +30,7 @@ Le numéro de groupe est enregistré en EEPROM
 #include <WiFiManager.h>         //https://github.com/tzapu/WiFiManager
 WiFiManager wifiManager;
 #define APNAME "mrLEDTUBE12"
-#define VERSION 13
+#define VERSION 14
 
 #include <ArtnetWifi.h>
 WiFiUDP UdpSend;
@@ -476,9 +476,28 @@ void setup() {
     
     if(digitalRead(D1)) // si on relache le bouton : autoConnect
     {
-      //wifiManager.autoConnect(APNAME);
-      wifiManager.autoConnect();
-            }
+      // wifiManager.autoConnect(APNAME);
+      WiFi.begin("OpenPoulpy", "youhououhou");
+          FastLED.clear();
+          int tentatives = 0;
+      while (WiFi.status() != WL_CONNECTED)
+      {
+          delay(1000);
+          leds[5*tentatives].b=150;
+           FastLED.show();
+          Serial.print(".");
+          
+          if (tentatives > 20)
+          {            
+            break;
+          }
+          tentatives++;
+      }
+      if (WiFi.status() != WL_CONNECTED)
+      {
+          wifiManager.autoConnect();
+      }
+    }
     else // si on maintient le bouton : choix du réseau wifi
     {
       for(int j=0;j<15;j++)
@@ -488,7 +507,7 @@ void setup() {
       leds[j].b=0;
       }
       FastLED.show();
-      wifiManager.startConfigPortal(APNAME,NULL);
+      wifiManager.startConfigPortal();
       updateFirmware();
     }
 
@@ -558,7 +577,7 @@ void loop() {
   else // etat==SETUP -> on fait clignoter un nombre de LEDs correspondant au groupe du tube
   {
     FastLED.clear();
-    for(int j=0;j<setupTubeNumber;j++)
+    for(int j=1;j<=setupTubeNumber;j++)
     {
       leds[j].r=0;
       leds[j].g=150;
