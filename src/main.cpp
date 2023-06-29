@@ -12,7 +12,8 @@ Mode 3 : 234 RGB + 5 LENGTH + 6 OFFSET + 7 OFFSET TUBE
 Mode 4 : 234 RGB + 5 LENGTH + 6 OFFSET + 7 OFFSET TUBE (tapered)
 Mode 5 : individual rgb 234 567 ...
 Mode 6 : RGB séparé pour chaque groupe : 234 RGB GRP0, 567 RGB GRP1, 8910 RGB GRP2, ...
-
+Mode 7 : FX1 Segments montant : 6 canaux par groupe : 234 RGB + 5 longueur segment + 6 longueur espace (pixels éteints entre deux segments) + 7 speed (0 = vitesse max vers le bas, 128 = arrêt, 255 = vitesse max vers le haut)
+Mode 8 : FX2 Segments montant R G B : 6 canaux par groupe : 234 RGB + 5 6 7 longueur segment rgb + 8 9 10 longueur espace rgb (pixels éteints entre deux segments) + 11 12 13 speed r g b (0 = vitesse max vers le bas, 128 = arrêt, 255 = vitesse max vers le haut)
 Mode 255 : on affiche le numéro du groupe (0 à 10)
 
 SETUP (clic long pour y accéder ou en sortir) : réglage du numéro de groupe
@@ -57,6 +58,7 @@ bool runningMode = DMXMODE;
 #define MAXLEDLENGTH 144
 //#define MAXLEDLENGTH 10 // en mode programmation quand le ledstrip est alimenté via l'ESP, on se limite à 10 leds (pour ne pas le brûler)
 CRGB leds[MAXLEDLENGTH];
+uint8_t ledsTemp[MAXLEDLENGTH][3];
 
 
 // #include <TM1637Display.h>
@@ -75,6 +77,18 @@ OneButton button1(D1, true);
 int setupAddress = 1;
 int setupMode = 1;
 int setupTubeNumber = 1;
+
+double lastOffset = 0;
+
+double lastOffsetR = 0;
+double lastOffsetG = 0;
+double lastOffsetB = 0;
+
+double offsetInc = 0.1;
+
+double offsetIncR = 0.1;
+double offsetIncG = 0.1;
+double offsetIncB = 0.1;
 
 #define RUNNING true
 #define SETUP false
@@ -223,6 +237,13 @@ void updateFirmware()
   
 }
 
+double mrdoublemodulo(double nombre, double diviseur)
+{
+  while(nombre<0)nombre+=diviseur;
+  while(nombre>=diviseur)nombre-=diviseur;
+  return nombre;
+}
+
 void DMX2LEDSTRIP()
 {
 
@@ -235,12 +256,33 @@ int ledend;
 int ledlength;
 double ledDimmer;
 double ledDimmerIncrement;
+int onLength;
+int offLength;
+int intoffset;
+int fxSpeed;
+
+int onLengthR;
+int offLengthR;
+int intoffsetR;
+int fxSpeedR;
+
+int onLengthG;
+int offLengthG;
+int intoffsetG;
+int fxSpeedG;
+
+int onLengthB;
+int offLengthB;
+int intoffsetB;
+int fxSpeedB;
 
   int ir = 3*setupTubeNumber + 1;
   int ig = 3*setupTubeNumber + 2;
   int ib = 3*setupTubeNumber + 3;
 
 int ledoffset = 0;
+int pos = 0;
+
 switch (setupMode)
 {
 case 0 : // 234 RGB for all strip at once
@@ -368,6 +410,156 @@ case 0 : // 234 RGB for all strip at once
       leds[j/3].g=dmxChannels[ig];  
       leds[j/3].b=dmxChannels[ib];        
   }
+  break;
+
+  case 7 : // Mode 7 : FX1 Segments montant : 6 canaux par groupe : 234 RGB + 5 longueur segment + 6 longueur espace (pixels éteints entre deux segments) + 7 speed (0 = vitesse max vers le bas, 128 = arrêt, 255 = vitesse max vers le haut)
+     ir = dmxChannels[6*setupTubeNumber + 1];
+     ig = dmxChannels[6*setupTubeNumber + 2];
+     ib = dmxChannels[6*setupTubeNumber + 3];
+     onLength = dmxChannels[6*setupTubeNumber + 4];
+     offLength = dmxChannels[6*setupTubeNumber + 5];
+     fxSpeed = dmxChannels[6*setupTubeNumber + 6]-128;
+    // onLength = 10;
+    // offLength = 5;
+    // ir=205;
+    // ig=90;
+    // ib=0;
+  for(int j=0;j<MAXLEDLENGTH;j++)
+  {
+
+    if(onLength-->0)    
+    {
+        ledsTemp[j][0]= ir;
+        ledsTemp[j][1]= ig;
+        ledsTemp[j][2]= ib;
+    }
+    else if(offLength-->0)
+    {
+        ledsTemp[j][0]= 0;
+        ledsTemp[j][1]= 0;
+        ledsTemp[j][2]= 0;
+    }
+    else
+    {
+     onLength = dmxChannels[6*setupTubeNumber + 4];
+     offLength = dmxChannels[6*setupTubeNumber + 5];
+    }
+
+  }
+
+  intoffset = (int)mrdoublemodulo(lastOffset,(double)MAXLEDLENGTH);
+
+  for(int j=0;j<MAXLEDLENGTH;j++)
+  {
+    leds[(j+intoffset)%MAXLEDLENGTH].r=ledsTemp[j][0];
+    leds[(j+intoffset)%MAXLEDLENGTH].g=ledsTemp[j][1];
+    leds[(j+intoffset)%MAXLEDLENGTH].b=ledsTemp[j][2];
+  }
+  lastOffset=lastOffset+ (fxSpeed*offsetInc);
+
+
+
+  break;
+
+  case 8 : // Mode 8 : FX2 Segments montant R G B : 13 canaux par groupe : 234 RGB + 5 6 7 longueur segment rgb + 8 9 10 longueur espace rgb (pixels éteints entre deux segments) + 11 12 13 speed r g b (0 = vitesse max vers le bas, 128 = arrêt, 255 = vitesse max vers le haut)
+     ir = dmxChannels[6*setupTubeNumber + 1];
+     ig = dmxChannels[6*setupTubeNumber + 2];
+     ib = dmxChannels[6*setupTubeNumber + 3];
+     onLengthR = dmxChannels[6*setupTubeNumber + 4];
+     onLengthG = dmxChannels[6*setupTubeNumber + 5];
+     onLengthB = dmxChannels[6*setupTubeNumber + 6];
+     offLengthR = dmxChannels[6*setupTubeNumber + 7];
+     offLengthG = dmxChannels[6*setupTubeNumber + 8];
+     offLengthB = dmxChannels[6*setupTubeNumber + 9];
+     fxSpeedR = dmxChannels[6*setupTubeNumber + 10]-128;
+     fxSpeedG = dmxChannels[6*setupTubeNumber + 11]-128;
+     fxSpeedB = dmxChannels[6*setupTubeNumber + 12]-128;
+    
+    
+
+  for(int j=0;j<MAXLEDLENGTH;j++)
+  {
+
+    if(onLengthR-->0)    
+    {
+        ledsTemp[j][0]= ir;        
+    }
+    else if(offLengthR-->0)
+    {
+        ledsTemp[j][0]= 0;
+        
+    }
+    else
+    {
+     onLengthR = dmxChannels[6*setupTubeNumber + 4];
+     offLengthR = dmxChannels[6*setupTubeNumber + 7];
+    }
+
+  }
+
+   for(int j=0;j<MAXLEDLENGTH;j++)
+  {
+
+    if(onLengthG-->0)    
+    {
+        ledsTemp[j][1]= ig;        
+    }
+    else if(offLengthG-->0)
+    {
+        ledsTemp[j][1]= 0;
+        
+    }
+    else
+    {
+     onLengthG = dmxChannels[6*setupTubeNumber + 5];
+     offLengthG = dmxChannels[6*setupTubeNumber + 8];
+    }
+
+  }
+
+   for(int j=0;j<MAXLEDLENGTH;j++)
+  {
+
+    if(onLengthB-->0)    
+    {
+        ledsTemp[j][2]= ib;        
+    }
+    else if(offLengthB-->0)
+    {
+        ledsTemp[j][2]= 0;
+        
+    }
+    else
+    {
+     onLengthB = dmxChannels[6*setupTubeNumber + 6];
+     offLengthB = dmxChannels[6*setupTubeNumber + 9];
+    }
+
+  }
+
+  intoffset = (int)mrdoublemodulo(lastOffsetR,(double)MAXLEDLENGTH);
+  for(int j=0;j<MAXLEDLENGTH;j++)
+  {
+    leds[(j+intoffset)%MAXLEDLENGTH].r=ledsTemp[j][0];    
+  }
+  lastOffsetR=lastOffsetR+ (fxSpeedR*offsetIncR);
+
+  intoffset = (int)mrdoublemodulo(lastOffsetG,(double)MAXLEDLENGTH);
+  for(int j=0;j<MAXLEDLENGTH;j++)
+  {
+    leds[(j+intoffset)%MAXLEDLENGTH].g=ledsTemp[j][1];    
+  }
+  lastOffsetG=lastOffsetG+ (fxSpeedG*offsetIncG);
+
+  intoffset = (int)mrdoublemodulo(lastOffsetB,(double)MAXLEDLENGTH);
+  for(int j=0;j<MAXLEDLENGTH;j++)
+  {
+    leds[(j+intoffset)%MAXLEDLENGTH].b=ledsTemp[j][2];    
+  }
+  lastOffsetB=lastOffsetB+ (fxSpeedB*offsetIncB);
+
+
+
   break;
 
    case 255 : // affichage du numéro de groupe
