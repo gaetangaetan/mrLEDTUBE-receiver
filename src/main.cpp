@@ -283,9 +283,27 @@ int fxSpeedB;
 int ledoffset = 0;
 int pos = 0;
 
+int groupChannelOffset;
+/*
+1 mode général (9 = on utilise "mode groupe")
+2 r
+3 g
+4 b
+5 param 1
+6 param 2
+7 param 3
+8 param 4
+9 param 5
+10 param 6
+11 param 7
+12 param 8
+13 param 9
+14 mode groupe
+*/
 switch (setupMode)
 {
 case 0 : // 234 RGB for all strip at once
+
   for(int j=0;j<  MAXLEDLENGTH;j++)
   {
       leds[j].r=dmxChannels[1];  
@@ -560,6 +578,25 @@ case 0 : // 234 RGB for all strip at once
 
 
 
+  break;
+
+  case 9 : // chaque groupe utilise son propre mode (channel 14)
+    switch (dmxChannels[14])
+    {
+      groupChannelOffset = 13*setupTubeNumber + 1;
+    case 0: // 234 RGB for all strip at once
+
+      for (int j = 0; j < MAXLEDLENGTH; j++)
+      {
+       leds[j].r = dmxChannels[groupChannelOffset+1];
+       leds[j].g = dmxChannels[groupChannelOffset+2];
+       leds[j].b = dmxChannels[groupChannelOffset+3];
+      }
+      break;
+
+    default:
+    break;
+   }
   break;
 
    case 255 : // affichage du numéro de groupe
