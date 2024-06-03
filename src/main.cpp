@@ -33,8 +33,8 @@ Le numéro de groupe est enregistré en EEPROM
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h>         //https://github.com/tzapu/WiFiManager
 WiFiManager wifiManager;
-#define APNAME "mrLEDTUBE12"
-#define VERSION 14
+#define APNAME "mrLEDTUBE15"
+#define VERSION 15
 
 #include <ArtnetWifi.h>
 WiFiUDP UdpSend;
