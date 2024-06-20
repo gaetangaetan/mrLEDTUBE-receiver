@@ -1,4 +1,6 @@
-// version groupe fixe
+// version groupe fixe : TUBENUMBER doit être défini pour chaque récepteur
+#define TUBENUMBER 0
+#define DATA_PIN D3
 
 /* basée sur version fonctionnelle du 15 06 2023
 D1 bouton
@@ -21,6 +23,8 @@ Le nombre de LEDS correspondant au numéro de groupe clignote
 Le numéro de groupe est enregistré en EEPROM
 */ 
 
+
+
 #include <Arduino.h>
 #include <EEPROM.h>
 #include <ESP8266WiFi.h>          //https://github.com/esp8266/Arduino
@@ -33,8 +37,8 @@ Le numéro de groupe est enregistré en EEPROM
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h>         //https://github.com/tzapu/WiFiManager
 WiFiManager wifiManager;
-#define APNAME "mrLEDTUBE15"
-#define VERSION 15
+#define APNAME "mrLEDTUBE16"
+#define VERSION 16
 
 #include <ArtnetWifi.h>
 WiFiUDP UdpSend;
@@ -51,11 +55,11 @@ bool runningMode = DMXMODE;
 // need to define DATA_PIN.  For led chipsets that are SPI based (four wires - data, clock,
 // ground, and power), like the LPD8806 define both DATA_PIN and CLOCK_PIN
 // Clock pin only needed for SPI based chipsets when not using hardware SPI
-#define DATA_PIN D2
+
 
 
 // Define the array of leds
-#define MAXLEDLENGTH 144
+#define MAXLEDLENGTH 300
 //#define MAXLEDLENGTH 10 // en mode programmation quand le ledstrip est alimenté via l'ESP, on se limite à 10 leds (pour ne pas le brûler)
 CRGB leds[MAXLEDLENGTH];
 uint8_t ledsTemp[MAXLEDLENGTH][3];
@@ -76,7 +80,7 @@ OneButton button1(D1, true);
 
 int setupAddress = 1;
 int setupMode = 1;
-int setupTubeNumber = 1;
+int setupTubeNumber = TUBENUMBER;
 
 double lastOffset = 0;
 
@@ -249,7 +253,8 @@ void DMX2LEDSTRIP()
 
   FastLED.clear();
 
-  setupMode = dmxChannels[0];
+  //setupMode = dmxChannels[0];
+  setupMode = 6;
   int ledstart;
   int ledmiddle;
   int ledend;
@@ -424,6 +429,8 @@ void DMX2LEDSTRIP()
     break;
 
   case 6: // individual rgb for each tubegroup 234 567 ...
+  Serial.print("dmxChannels[ir]=");
+  Serial.println(dmxChannels[ir]);
     for (int j = 0; j < MAXLEDLENGTH * 3; j += 3)
     {
       leds[j / 3].r = dmxChannels[ir];
@@ -858,7 +865,7 @@ void DMX2LEDSTRIP()
 
 void click1() {//incrémente le numéro de groupe  
    if(etat==RUNNING)return; // en mode RUNNING, on ignore cette action
-   setupTubeNumber=(setupTubeNumber+1)%10;
+   //setupTubeNumber=(setupTubeNumber+1)%10;
 
 } 
 
@@ -868,11 +875,11 @@ void longPressStart1() {
 
   if(etat==SETUP) // avant de sortir du SETUP, on enregistre les données en mémoire persistante
   {    
-    EEPROM.write(0,setupAddress);
-    EEPROM.write(4,setupMode);
-    EEPROM.write(8,setupTubeNumber);
-    Serial.print("Commit =  ");
-    Serial.println(EEPROM.commit());
+    // EEPROM.write(0,setupAddress);
+    // EEPROM.write(4,setupMode);
+    // EEPROM.write(8,setupTubeNumber);
+    // Serial.print("Commit =  ");
+    // Serial.println(EEPROM.commit());
     
   }
   
@@ -918,9 +925,8 @@ void setup() {
 
   // affichage de la version (blink)
   //ledProgress(VERSION,100);
-
-
-  if(digitalRead(D1))// démarrage en mode DMX (on n'appuye pas sur le bouton au démarrage)
+  
+  if(true)// démarrage en mode DMX 
   {
     runningMode = DMXMODE;
     Serial.println("RUNNING MODE = DMX");
@@ -947,79 +953,14 @@ void setup() {
     esp_now_register_recv_cb(OnDataRecv);
 
   }
-  else // démarrage en mode ArtNet (le bouton est enfoncé au démarrage)
-  {
-    runningMode = ARTNETMODE;
-    Serial.println("RUNNING MODE = ARTNET");
-
-     FastLED.clear();
-    for(int j=0;j<10;j++)
-    {
-      leds[j].r=0;
-      leds[j].g=150;
-      leds[j].b=150;
-    }
-    FastLED.show();
-    delay(3000);
-    
-    if(digitalRead(D1)) // si on relache le bouton : autoConnect
-    {
-      // wifiManager.autoConnect(APNAME);
-      WiFi.begin("OpenPoulpy", "youhououhou");
-          FastLED.clear();
-          int tentatives = 0;
-      while (WiFi.status() != WL_CONNECTED)
-      {
-          delay(1000);
-          leds[5*tentatives].b=150;
-           FastLED.show();
-          Serial.print(".");
-          
-          if (tentatives > 20)
-          {            
-            break;
-          }
-          tentatives++;
-      }
-      if (WiFi.status() != WL_CONNECTED)
-      {
-         String ssid = "ESP" + String(ESP.getChipId());
-      
-          wifiManager.autoConnect(ssid.c_str(), NULL);
-      }
-
-      // affichage leds jaune, 
-      for(int j=0;j<30;j++)
-      {
-      leds[j].r=250;
-      leds[j].g=100;
-      leds[j].b=0;
-      }
-      FastLED.show();
-      delay(2000);
-      // si on appuye sur le bouton -> update firmware
-      if(!digitalRead(D1))updateFirmware();
-
-    }
-    else // si on maintient le bouton : choix du réseau wifi
-    {
-      for(int j=0;j<15;j++)
-      {
-      leds[j].r=0;
-      leds[j].g=150;
-      leds[j].b=0;
-      }
-      FastLED.show();
-      wifiManager.startConfigPortal();
-      updateFirmware();
-    }
+  
 
     
 
   //  delay(5000);
     
     
-  }
+  
   
   
 
@@ -1030,15 +971,17 @@ void setup() {
   
   
   
-EEPROM.begin(EEPROM_SIZE);
+//EEPROM.begin(EEPROM_SIZE);
 //uint eeAddress=0;
 
-setupAddress = EEPROM.read(0);
-setupMode = EEPROM.read(4);
-setupTubeNumber = EEPROM.read(8);
+// setupAddress = EEPROM.read(0);
+// setupMode = EEPROM.read(4);
+//setupTubeNumber = EEPROM.read(8);
+setupTubeNumber =TUBENUMBER;
+
 if((setupAddress<1)||(setupAddress>512))setupAddress=1;
 if((setupMode<1)||(setupMode>255))setupMode=1;
-if((setupTubeNumber<0)||(setupTubeNumber>32))setupTubeNumber=0;
+if((setupTubeNumber<0)||(setupTubeNumber>32))setupTubeNumber=TUBENUMBER;
 
 //EEPROM.end();
 
@@ -1069,7 +1012,7 @@ Serial.println(setupTubeNumber);
 }
 
 void loop() {
-  button1.tick();
+  //button1.tick();
 
   
   if(etat==RUNNING)
