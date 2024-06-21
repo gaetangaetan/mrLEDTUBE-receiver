@@ -1,6 +1,12 @@
+// version publique
 // version groupe fixe : TUBENUMBER doit être défini pour chaque récepteur
 #define TUBENUMBER 0
 #define DATA_PIN D3
+
+// Define the array of leds
+#define MAXLEDLENGTH 144
+//#define MAXLEDLENGTH 10 // en mode programmation quand le ledstrip est alimenté via l'ESP, on se limite à 10 leds (pour ne pas le brûler)
+
 
 /* basée sur version fonctionnelle du 15 06 2023
 D1 bouton
@@ -58,9 +64,6 @@ bool runningMode = DMXMODE;
 
 
 
-// Define the array of leds
-#define MAXLEDLENGTH 300
-//#define MAXLEDLENGTH 10 // en mode programmation quand le ledstrip est alimenté via l'ESP, on se limite à 10 leds (pour ne pas le brûler)
 CRGB leds[MAXLEDLENGTH];
 uint8_t ledsTemp[MAXLEDLENGTH][3];
 
