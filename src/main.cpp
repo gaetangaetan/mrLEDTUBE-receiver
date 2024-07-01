@@ -1,4 +1,4 @@
-// version artnet en cours
+// plus de mode Artnet disponible
 
 /* basée sur version fonctionnelle du 15 06 2023
 D1 bouton
@@ -21,6 +21,15 @@ Le nombre de LEDS correspondant au numéro de groupe clignote
 Le numéro de groupe est enregistré en EEPROM
 */ 
 
+#define DATA_PIN D2 // pin de contrôle du strip led
+#define BUTTONPIN D1 // on définit le pin positif du bouton (il s'agit d'un pullup, quand le bouton est relevé, la valeur du pin est HIGH, quand le bouton est enfoncé, le contact au GND est fait et la valeur est donc LOW)
+#define BUTTONGROUNDPIN D5 // pour faciliter le montage, on utilise une pin pour fournir le GND au bouton
+
+#define MAXLEDLENGTH 144 // longueur du strip led // en général, la longueur n'a pas particulièrement d'influence sur la latence du contrôleur mais ça peut être utile de la régler pour les programmes qui font le "tour" 
+                         // du strip led (comme des segments de leds qui vont de bas en haut par exemple) ou pour être sûr de ne pas demander plus de courant que ce que l'alimentation prévue ne peut fournir
+
+//#define MAXLEDLENGTH 10 // durant la programmation du code, pour les essais, si le ledstrip est alimenté via l'ESP, on se limite à quelques leds (pour ne pas le brûler)
+
 #include <Arduino.h>
 #include <EEPROM.h>
 #include <ESP8266WiFi.h>          //https://github.com/esp8266/Arduino
@@ -36,9 +45,9 @@ WiFiManager wifiManager;
 #define APNAME "mrLEDTUBE15"
 #define VERSION 15
 
-#include <ArtnetWifi.h>
-WiFiUDP UdpSend;
-ArtnetWifi artnet;
+// #include <ArtnetWifi.h>
+// WiFiUDP UdpSend;
+// ArtnetWifi artnet;
 
 #define EEPROM_SIZE 32
 #define DMXMODE true
@@ -47,26 +56,13 @@ bool runningMode = DMXMODE;
 
 #include <FastLED.h>
 
-// For led chips like WS2812, which have a data line, ground, and power, you just
-// need to define DATA_PIN.  For led chipsets that are SPI based (four wires - data, clock,
-// ground, and power), like the LPD8806 define both DATA_PIN and CLOCK_PIN
-// Clock pin only needed for SPI based chipsets when not using hardware SPI
-#define DATA_PIN D2
-
-
-// Define the array of leds
-#define MAXLEDLENGTH 144
-//#define MAXLEDLENGTH 10 // en mode programmation quand le ledstrip est alimenté via l'ESP, on se limite à 10 leds (pour ne pas le brûler)
 CRGB leds[MAXLEDLENGTH];
 uint8_t ledsTemp[MAXLEDLENGTH][3];
 
 
-// #include <TM1637Display.h>
-// TM1637Display display(D7, D6); // clck DIO
-
 #include "OneButton.h"
-OneButton button1(D1, true);
-// Setup a new OneButton on pin D6.  
+OneButton button1(BUTTONPIN, true);
+// Setup a new OneButton on pin BUTTONPIN.  
 
 
 #include <ESP8266WiFiMulti.h>
@@ -91,44 +87,45 @@ double offsetIncG = 0.1;
 double offsetIncB = 0.1;
 
 #define RUNNING true
-#define SETUP false
+#define SETUP false 
 
-bool etat = RUNNING;
+bool etat = RUNNING; // etat peut être en mode SETUP ou RUNNING : pour entrer ou sortir du SETUP, il faut appuyer longuement sur le bouton, le ledstrip affiche alors le numéro n du groupe en allumant n leds vertes
+                     // on peut changer de groupe en appuyant  sur le bouton, on incrémente le numéro de groupe jusque la limite (fixée à 10 pour le moment) au delà de laquelle on recommence au groupe 0
+                     // le groupe 0 conrrespond à 1 led rouge pour le distinguer du groupe 1 (une led verte)
+                    
 
 int flashInterval;
 
-uint8_t dmxChannels[512];
+uint8_t dmxChannels[512]; // tableau dans lequel seront stockées les valeurs des 512 canaux DMX
 
-typedef struct struct_message {
-    uint8_t status;
-    uint8_t data;    
-} struct_message;
+// typedef struct struct_message {
+//     uint8_t status;
+//     uint8_t data;    
+// } struct_message;
 
 
-struct_message incomingMessage;
-struct_message outgoingMessage;
+// struct_message incomingMessage;
+// struct_message outgoingMessage;
 
-typedef struct struct_dmx_message {
-    uint8_t dmx001;
-    uint8_t dmx002;
-    uint8_t dmx003;
-    uint8_t dmx004;
+// typedef struct struct_dmx_message {
+//     uint8_t dmx001;
+//     uint8_t dmx002;
+//     uint8_t dmx003;
+//     uint8_t dmx004;
         
-} struct_dmx_message;
+// } struct_dmx_message;
 
-struct_dmx_message incomingDMXMessage;
+// struct_dmx_message incomingDMXMessage;
 
 typedef struct struct_dmx_packet {
-    uint8_t blockNumber; // on divise les 512 adresses en 4 blocs de 128 adresses
+    uint8_t blockNumber; // on divise les 512 adresses en 4 blocs de 128 adresses (on ne peut pas tout envoyer en une fois car la taille maximale des packets transmis par ESP-NOW est limitée à 250 bytes)
     uint8_t dmxvalues[128];   
 } struct_dmx_packet;
 
 struct_dmx_packet incomingDMXPacket;
 
 
-void OnDataSent(u8 *mac_addr, u8 status) {  
-     
-}
+void OnDataSent(u8 *mac_addr, u8 status) {} // la fonction OnDataSent doit être déclarée mais concrètement on n'en a pas besoin (pour l'instant, aucune donnée n'est renvoyée par les récepteurs à l'émetteur)
 
 
 // Callback when data is received
@@ -142,100 +139,6 @@ void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
  
 }
 
-void update_started() {
-  Serial.println("CALLBACK:  HTTP update process started");
-  
-}
-
-void update_finished() {
-  
-  Serial.println("CALLBACK:  HTTP update process finished");
-}
-
-void update_progress(int cur, int total) {
-  int progress = (MAXLEDLENGTH*cur)/total;
-  FastLED.clear();
-    for(int j=0;j<progress;j++)
-    {
-      leds[j].r=0;
-      leds[j].g=0;
-      leds[j].b=150;
-    }
-    FastLED.show();
-  Serial.printf("CALLBACK:  HTTP update process at %d of %d bytes...\n", cur, total);
-}
-
-void update_error(int err) {
-  FastLED.clear();
-    for(int j=0;j<MAXLEDLENGTH;j++)
-    {
-      leds[j].r=150;
-      leds[j].g=0;
-      leds[j].b=0;
-    }
-    
-    FastLED.show();
-  
-  Serial.printf("CALLBACK:  HTTP update fatal error code %d\n", err);
-}
-
-void updateFirmware()
-{
-
-  ESPhttpUpdate.setClientTimeout(2000);  // default was 8000
-  
-  if ((WiFi.status() == WL_CONNECTED)) {
-
-    WiFiClient client;
-
-    // The line below is optional. It can be used to blink the LED on the board during flashing
-    // The LED will be on during download of one buffer of data from the network. The LED will
-    // be off during writing that buffer to flash
-    // On a good connection the LED should flash regularly. On a bad connection the LED will be
-    // on much longer than it will be off. Other pins than LED_BUILTIN may be used. The second
-    // value is used to put the LED on. If the LED is on with HIGH, that value should be passed
-    ESPhttpUpdate.setLedPin(LED_BUILTIN, LOW);
-
-    // Add optional callback notifiers
-    ESPhttpUpdate.onStart(update_started);
-    ESPhttpUpdate.onEnd(update_finished);
-    ESPhttpUpdate.onProgress(update_progress);
-    ESPhttpUpdate.onError(update_error);
-
-    t_httpUpdate_return ret = ESPhttpUpdate.update(client, "http://mrledtubefirmware.gaetanstreel.com/firmware.bin");
-    // Or:
-    // t_httpUpdate_return ret = ESPhttpUpdate.update(client, "server", 80, "file.bin");
-
-    switch (ret) {
-      case HTTP_UPDATE_FAILED: Serial.printf("HTTP_UPDATE_FAILD Error (%d): %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str()); 
-                FastLED.clear();
-        for(int j=0;j<MAXLEDLENGTH;j++)
-        {
-          leds[j].r=150;
-          leds[j].g=0;
-          leds[j].b=0;
-        }    
-        FastLED.show();
-        delay(2000);
-        break;
-
-      case HTTP_UPDATE_NO_UPDATES: Serial.println("HTTP_UPDATE_NO_UPDATES"); break;
-
-      case HTTP_UPDATE_OK: Serial.println("HTTP_UPDATE_OK"); 
-          FastLED.clear();
-        for(int j=0;j<MAXLEDLENGTH;j++)
-        {
-          leds[j].r=0;
-          leds[j].g=150;
-          leds[j].b=0;
-        }    
-        FastLED.show();
-        delay(2000);
-      break;
-    }
-  }
-  
-}
 
 double mrdoublemodulo(double nombre, double diviseur)
 {
@@ -910,26 +813,18 @@ void setup() {
   Serial.print("Version ");
   Serial.println(VERSION);
 
-
   pinMode(D5,OUTPUT);
   digitalWrite(D5,LOW);// on utilise D5 comme GND pour le bouton 1
   
   FastLED.addLeds<WS2812, DATA_PIN, GRB>(leds, MAXLEDLENGTH);  // GRB ordering is typical  
 
-  // affichage de la version (blink)
-  //ledProgress(VERSION,100);
-
-
-  if(digitalRead(D1))// démarrage en mode DMX (on n'appuye pas sur le bouton au démarrage)
-  {
+  
+  
     runningMode = DMXMODE;
     Serial.println("RUNNING MODE = DMX");
     
-
-    //pinMode(LED_BUILTIN,OUTPUT);
-  
-  WiFi.disconnect();
-  ESP.eraseConfig();
+    WiFi.disconnect();
+    ESP.eraseConfig();
  
   // Wifi STA Mode
   WiFi.mode(WIFI_STA);
@@ -946,90 +841,10 @@ void setup() {
 
     esp_now_register_recv_cb(OnDataRecv);
 
-  }
-  else // démarrage en mode ArtNet (le bouton est enfoncé au démarrage)
-  {
-    runningMode = ARTNETMODE;
-    Serial.println("RUNNING MODE = ARTNET");
-
-     FastLED.clear();
-    for(int j=0;j<10;j++)
-    {
-      leds[j].r=0;
-      leds[j].g=150;
-      leds[j].b=150;
-    }
-    FastLED.show();
-    delay(3000);
-    
-    if(digitalRead(D1)) // si on relache le bouton : autoConnect
-    {
-      // wifiManager.autoConnect(APNAME);
-      WiFi.begin("OpenPoulpy", "youhououhou");
-          FastLED.clear();
-          int tentatives = 0;
-      while (WiFi.status() != WL_CONNECTED)
-      {
-          delay(1000);
-          leds[5*tentatives].b=150;
-           FastLED.show();
-          Serial.print(".");
-          
-          if (tentatives > 20)
-          {            
-            break;
-          }
-          tentatives++;
-      }
-      if (WiFi.status() != WL_CONNECTED)
-      {
-         String ssid = "ESP" + String(ESP.getChipId());
-      
-          wifiManager.autoConnect(ssid.c_str(), NULL);
-      }
-
-      // affichage leds jaune, 
-      for(int j=0;j<30;j++)
-      {
-      leds[j].r=250;
-      leds[j].g=100;
-      leds[j].b=0;
-      }
-      FastLED.show();
-      delay(2000);
-      // si on appuye sur le bouton -> update firmware
-      if(!digitalRead(D1))updateFirmware();
-
-    }
-    else // si on maintient le bouton : choix du réseau wifi
-    {
-      for(int j=0;j<15;j++)
-      {
-      leds[j].r=0;
-      leds[j].g=150;
-      leds[j].b=0;
-      }
-      FastLED.show();
-      wifiManager.startConfigPortal();
-      updateFirmware();
-    }
-
-    
-
-  //  delay(5000);
-    
-    
-  }
-  
-  
-
     // link the button 1 functions.    
   button1.attachClick(click1);
   button1.attachLongPressStart(longPressStart1);
 
-  
-  
-  
 EEPROM.begin(EEPROM_SIZE);
 //uint eeAddress=0;
 
@@ -1049,23 +864,6 @@ Serial.print(" | Mode = ");
 Serial.print(setupMode);
 Serial.print(" | Tube Group = ");
 Serial.println(setupTubeNumber);
-
-  
-
-
-  
-
-   artnet.setArtDmxFunc([](DMX_FUNC_PARAM){
-  
-  for(int i=0;i<length;i++)
-  {
-    dmxChannels[i]=data[i];
-  }
-
-  
-  });
-
-  artnet.begin();
 }
 
 void loop() {
@@ -1074,7 +872,6 @@ void loop() {
   
   if(etat==RUNNING)
   {    
-    if(runningMode==ARTNETMODE)artnet.read();
     DMX2LEDSTRIP();  
   }
   else // etat==SETUP -> on fait clignoter un nombre de LEDs correspondant au groupe du tube  
