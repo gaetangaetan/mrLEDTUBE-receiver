@@ -4,7 +4,7 @@ Wiring :
 WEMOS D1 ---- MAW485 :
 RO : /
 DI (data in) : entrée connectée à D4 (ATTENTION!!! D4 est le pin par défaut avec cette librairie, pas TX!!!)
-RE et DE (receiver enable et driver enable) : LOW pour réception de données (GND)
+RE et DE (receiver enable et driver enable) : HIGH pour sortie DMX (5V)
 VCC - 5V
 GND - GND
 XLR1 : GND (shield)
