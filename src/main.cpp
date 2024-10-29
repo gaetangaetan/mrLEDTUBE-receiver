@@ -33,6 +33,8 @@ Le nombre de LEDS correspondant au numéro de groupe clignote
 Le numéro de groupe est enregistré en EEPROM
 */
 
+
+#define BUTTONLESS true
 #define DATA_PIN D2        // pin de contrôle du strip led
 #define BUTTONPIN D1       // on définit le pin positif du bouton (il s'agit d'un pullup, quand le bouton est relevé, la valeur du pin est HIGH, quand le bouton est enfoncé, le contact au GND est fait et la valeur est donc LOW)
 #define BUTTONGROUNDPIN D5 // pour faciliter le montage, on utilise une pin pour fournir le GND au bouton
@@ -332,7 +334,8 @@ void DMX2LEDSTRIP()
 // ----- button 1 callback functions
 
 void click1()
-{ // incrémente le numéro de groupe
+{   
+  // incrémente le numéro de groupe
   if (etat == RUNNING)
     return; // en mode RUNNING, on ignore cette action
   setupTubeNumber = (setupTubeNumber + 1) % 10;
@@ -416,7 +419,7 @@ void setup()
 
 void loop()
 {
-  button1.tick();
+  if(!BUTTONLESS)button1.tick();
 
   if (etat == RUNNING)
   {
