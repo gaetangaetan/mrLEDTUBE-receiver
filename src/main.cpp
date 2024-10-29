@@ -1,4 +1,5 @@
 /* 
+version textile connecté
 Ce code fait partie d'un système de contrôle DMX sans fil pour ledstrip.
 
 Le système est composé d'un émetteur qui dispose d'une entrée DMX et transmet les valeurs des 512 canaux à tous les récepteurs du système.
