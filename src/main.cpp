@@ -86,6 +86,9 @@ double offsetIncR = 0.1;
 double offsetIncG = 0.1;
 double offsetIncB = 0.1;
 
+uint8_t hueOffset =0;
+uint8_t randomHueOffset =0;
+
 #define RUNNING true
 #define SETUP false
 
@@ -175,6 +178,7 @@ Mode 255 : affiche le numéro de groupe
 
 */
 
+
 void DMX2LEDSTRIP()
 {
 
@@ -187,7 +191,9 @@ void DMX2LEDSTRIP()
   int onLength;
   int offLength;
   int intoffset;
-  int fxSpeed;
+  double fxSpeed;
+
+  double speedFactor;
 
   int pixelLength = 1;
   int pixelGap = 0;
@@ -199,6 +205,12 @@ void DMX2LEDSTRIP()
   int segmentLength;
 
   Color rgbcolor;
+            // Offset pour le défilement du dégradé
+  
+if (setupMode != 1) {
+    hueOffset = 0;
+} 
+
 
   switch (setupMode)
   {
@@ -212,95 +224,264 @@ void DMX2LEDSTRIP()
     }
     break;
 
-  case 1: // 1 COLOR + 2 DIMMER + 3 SPEED (tapered)
-  case 2:
-  case 3:
-  case 4:
-    rgbcolor = convertToColor(dmxChannels[1]);
+  
+#define DEGRADE_FACTOR 0.5 // Proportion du segment utilisée pour le dégradé (0.5 = moitié du segment)
 
-    ledDimmer = (double(1) / double(255)) * (double)(dmxChannels[2]);
 
-    segmentLength = setupMode * 8;
 
-    ir = rgbcolor.r * ledDimmer;
-    ig = rgbcolor.g * ledDimmer;
-    ib = rgbcolor.b * ledDimmer;
+case 1: // Mode Rainbow défilant avec contrôle du décalage, de la densité des couleurs (distance entre chaque couleur) et de la vitesse de défilement
+{
+    uint8_t colorDensity = dmxChannels[2]/2; // Canal 3 pour la densité des couleurs (distance entre pixels de même couleur)
+    uint8_t rainbowSpeed = dmxChannels[3]; // Canal 4 pour la vitesse de déplacement
+    
+    
 
-    onLength = segmentLength;
-    offLength = segmentLength;
+    // Calculer la densité des couleurs
+    uint8_t deltaHue = map(colorDensity, 0, 255, 1, 50); // Plus colorDensity est élevé, plus les couleurs sont espacées
 
-    fxSpeed = 16 * sin((double(1) / double(255)) * (double)(dmxChannels[3]) * 2 * PI);
-    ledDimmerIncrement = 1.0 / (double)(segmentLength) / 2.0;
+    // Générer un arc-en-ciel avec la densité contrôlée
+    fill_rainbow(leds, MAXLEDLENGTH, (hueOffset + (setupTubeNumber * dmxChannels[1])) % 255, deltaHue);
+    //fill_rainbow(leds, MAXLEDLENGTH, hueOffset+(setupTubeNumber*dmxChannels[1]), deltaHue);
 
-    ledDimmer = 0;
+    // Ajuster l'offset en fonction de la vitesse
+    hueOffset += map(rainbowSpeed, 0, 255, -5, 5); // Contrôle de la vitesse et de la direction (-5 à 5)
 
-    for (int j = 0; j < MAXLEDLENGTH; j++)
-    {
-
-      if (onLength-- > 0)
-      {
-        ledsTemp[j][0] = ir * ledDimmer;
-        ledsTemp[j][1] = ig * ledDimmer;
-        ledsTemp[j][2] = ib * ledDimmer;
-        ledDimmer = ledDimmer + ledDimmerIncrement;
-        if (ledDimmer >= 1)
-        {
-          ledDimmer = 1;
-          ledDimmerIncrement = -1.0 / (double)(segmentLength) / 2.0;
-        }
-        else if (ledDimmer <= 0)
-        {
-          ledDimmer = 0;
-        }
-      }
-      else if (offLength-- > 0)
-      {
-        ledsTemp[j][0] = 0;
-        ledsTemp[j][1] = 0;
-        ledsTemp[j][2] = 0;
-      }
-      else
-      {
-        onLength = segmentLength;
-        offLength = segmentLength;
-        ledDimmer = 0;
-        ledDimmerIncrement = 1.0 / (double)(segmentLength) / 2.0;
-      }
-    }
-
-    intoffset = (int)mrdoublemodulo(lastOffset, (double)MAXLEDLENGTH);
-
-    for (int j = 0; j < MAXLEDLENGTH; j++)
-    {
-      leds[(j + intoffset) % MAXLEDLENGTH].r = ledsTemp[j][0];
-      leds[(j + intoffset) % MAXLEDLENGTH].g = ledsTemp[j][1];
-      leds[(j + intoffset) % MAXLEDLENGTH].b = ledsTemp[j][2];
-    }
-    lastOffset = lastOffset + (fxSpeed * offsetInc);
+    // Afficher les LEDs
+    FastLED.show();
     break;
+}
 
-  case 5: // individual rgb : 1 pixellength + 2 pixelgap + 3 dimmer + 567 rgb pixel1 + 8 9 10 rgb pixel2 ...
+case 2: // Mode Rainbow avec intensité ajustable
+{
+    uint8_t colorDensity = dmxChannels[2] / 2; // Canal 3 pour la densité des couleurs (distance entre pixels de même couleur)
+    uint8_t rainbowSpeed = dmxChannels[3];    // Canal 4 pour la vitesse de déplacement
+    uint8_t intensity = dmxChannels[4];       // Canal 5 pour l’intensité générale des LEDs (0–255)
 
-    pixelLength = dmxChannels[1];
-    pixelGap = dmxChannels[2];
-    ledDimmer = (double)dmxChannels[3] / (double)255;
+    // Calculer la densité des couleurs
+    uint8_t deltaHue = map(colorDensity, 0, 255, 1, 50); // Plus colorDensity est élevé, plus les couleurs sont espacées
 
-    for (int j = 0; j < (3 * MAXLEDLENGTH) / (pixelLength + pixelGap); j += 3)
-    {
-      for (int pix = 0; pix < pixelLength; pix++)
-      {
-        leds[((pixelLength + pixelGap) * (j / 3)) + pix].r = dmxChannels[j + 4] * ledDimmer;
-        leds[((pixelLength + pixelGap) * (j / 3)) + pix].g = dmxChannels[j + 5] * ledDimmer;
-        leds[((pixelLength + pixelGap) * (j / 3)) + pix].b = dmxChannels[j + 6] * ledDimmer;
-      }
-      for (int pix = pixelLength; pix < pixelGap + pixelLength; pix++)
-      {
-        leds[((pixelLength + pixelGap) * (j / 3)) + pix].r = 0;
-        leds[((pixelLength + pixelGap) * (j / 3)) + pix].g = 0;
-        leds[((pixelLength + pixelGap) * (j / 3)) + pix].b = 0;
-      }
+    // Générer un arc-en-ciel avec la densité contrôlée
+    fill_rainbow(leds, MAXLEDLENGTH, (hueOffset + (setupTubeNumber * dmxChannels[1])) % 255, deltaHue);
+
+    // Appliquer l’intensité générale
+    for (int i = 0; i < MAXLEDLENGTH; i++) {
+        leds[i].fadeLightBy(255 - intensity); // Réduire la luminosité en fonction de l'intensité
     }
+
+    // Ajuster l'offset en fonction de la vitesse
+    hueOffset += map(rainbowSpeed, 0, 255, -5, 5); // Contrôle de la vitesse et de la direction (-5 à 5)
+
+    // Afficher les LEDs
+    FastLED.show();
     break;
+}
+
+
+case 3: // Mode scintillement aléatoire
+{
+    // Paramètres DMX
+    uint8_t colorIndex = dmxChannels[1];     // Couleur des pixels
+    uint8_t numPixels = dmxChannels[2]/10;     // Nombre de pixels allumés simultanément
+    uint8_t flickerRate = dmxChannels[3];   // Fréquence de scintillement (pixels par seconde)
+
+    static unsigned long lastUpdateTime = 0; // Temps de la dernière mise à jour
+    static bool pixelStates[MAXLEDLENGTH] = {false}; // État de chaque pixel (allumé ou éteint)
+
+    // Convertir l'index en couleur
+    Color pixelColor = convertToColor(colorIndex);
+
+    // Calculer l'intervalle de mise à jour en millisecondes
+    unsigned long interval = 1000 / map(flickerRate, 0, 255, 1, 100); // Intervalle en fonction du taux de scintillement
+
+    // Mettre à jour les pixels si l'intervalle est écoulé
+    if (millis() - lastUpdateTime > interval) {
+        lastUpdateTime = millis();
+
+        // Désactiver un pixel aléatoire (si nécessaire)
+        for (int i = 0; i < MAXLEDLENGTH; i++) {
+            if (pixelStates[i] && random(0, 100) < 50) { // 50% de probabilité de s'éteindre
+                pixelStates[i] = false;
+            }
+        }
+
+        // Activer de nouveaux pixels aléatoires
+        int activePixels = 0;
+        for (int i = 0; i < MAXLEDLENGTH; i++) {
+            if (pixelStates[i]) {
+                activePixels++;
+            }
+        }
+
+        while (activePixels < numPixels) {
+            int randomPixel = random(0, MAXLEDLENGTH);
+            if (!pixelStates[randomPixel]) {
+                pixelStates[randomPixel] = true;
+                activePixels++;
+            }
+        }
+    }
+
+    // Appliquer les couleurs
+    for (int i = 0; i < MAXLEDLENGTH; i++) {
+        if (pixelStates[i]) {
+            leds[i].r = pixelColor.r;
+            leds[i].g = pixelColor.g;
+            leds[i].b = pixelColor.b;
+        } else {
+            leds[i].r = 0;
+            leds[i].g = 0;
+            leds[i].b = 0;
+        }
+    }
+
+    // Afficher les LEDs
+    FastLED.show();
+    break;
+}
+
+#define FADE_SPEED 0.02 // Vitesse de transition : plus petit = transitions plus longues
+
+case 4: // Mode scintillement progressif
+{
+    // Paramètres DMX
+    uint8_t colorIndex = dmxChannels[1];     // Couleur des pixels
+    uint8_t numPixels = dmxChannels[2] / 10; // Nombre de pixels allumés simultanément (ajusté)
+    uint8_t flickerRate = dmxChannels[3]/2;   // Fréquence de scintillement (pixels par seconde)
+
+    static unsigned long lastUpdateTime = 0; // Temps de la dernière mise à jour
+    static float pixelIntensities[MAXLEDLENGTH] = {0.0}; // Intensité de chaque pixel (de 0.0 à 1.0)
+    static int pixelTargets[MAXLEDLENGTH] = {0};         // État cible (1 = allumé, 0 = éteint)
+
+    // Convertir l'index en couleur
+    Color pixelColor = convertToColor(colorIndex);
+
+    // Calculer l'intervalle de mise à jour en millisecondes
+    unsigned long interval = 1000 / map(flickerRate, 0, 255, 1, 100); // Intervalle en fonction du taux de scintillement
+
+    // Mettre à jour les pixels si l'intervalle est écoulé
+    if (millis() - lastUpdateTime > interval) {
+        lastUpdateTime = millis();
+
+        // Désactiver un pixel aléatoire (si nécessaire)
+        for (int i = 0; i < MAXLEDLENGTH; i++) {
+            if (pixelTargets[i] == 1 && random(0, 100) < 50) { // 50% de probabilité de passer à l'état "éteint"
+                pixelTargets[i] = 0;
+            }
+        }
+
+        // Activer de nouveaux pixels aléatoires
+        int activePixels = 0;
+        for (int i = 0; i < MAXLEDLENGTH; i++) {
+            if (pixelTargets[i] == 1) {
+                activePixels++;
+            }
+        }
+
+        while (activePixels < numPixels) {
+            int randomPixel = random(0, MAXLEDLENGTH);
+            if (pixelTargets[randomPixel] == 0) {
+                pixelTargets[randomPixel] = 1; // Passer à l'état "allumé"
+                activePixels++;
+            }
+        }
+    }
+
+  for (int i = 0; i < MAXLEDLENGTH; i++) {
+    if (pixelTargets[i] == 1) {
+        pixelIntensities[i] = min(pixelIntensities[i] + FADE_SPEED, 1.0); // Augmenter progressivement
+    } else {
+        pixelIntensities[i] = max(pixelIntensities[i] - FADE_SPEED, 0.0); // Diminuer progressivement
+    }
+}
+
+
+    // Appliquer les couleurs en fonction des intensités
+    for (int i = 0; i < MAXLEDLENGTH; i++) {
+        leds[i].r = pixelColor.r * pixelIntensities[i];
+        leds[i].g = pixelColor.g * pixelIntensities[i];
+        leds[i].b = pixelColor.b * pixelIntensities[i];
+    }
+
+    // Afficher les LEDs
+    FastLED.show();
+    break;
+}
+
+
+case 5: // Mode scintillement progressif par groupes
+{
+    // Paramètres DMX
+    uint8_t colorIndex = dmxChannels[1];     // Couleur des pixels
+    uint8_t numGroups = dmxChannels[2] / 10; // Nombre de groupes actifs simultanément (ajusté)
+    uint8_t flickerRate = dmxChannels[3] / 2; // Fréquence de scintillement (groupes par seconde)
+
+    static unsigned long lastUpdateTime = 0; // Temps de la dernière mise à jour
+    static float groupIntensities[MAXLEDLENGTH] = {0.0}; // Intensité de chaque groupe (de 0.0 à 1.0)
+    static int groupTargets[MAXLEDLENGTH] = {0};         // État cible (1 = allumé, 0 = éteint)
+    static int groupLengths[MAXLEDLENGTH] = {0};         // Longueur des groupes
+
+    // Convertir l'index en couleur
+    Color pixelColor = convertToColor(colorIndex);
+
+    // Calculer l'intervalle de mise à jour en millisecondes
+    unsigned long interval = 1000 / map(flickerRate, 0, 255, 1, 100); // Intervalle en fonction du taux de scintillement
+
+    // Mettre à jour les groupes si l'intervalle est écoulé
+    if (millis() - lastUpdateTime > interval) {
+        lastUpdateTime = millis();
+
+        // Désactiver un groupe aléatoire (si nécessaire)
+        for (int i = 0; i < MAXLEDLENGTH; i++) {
+            if (groupTargets[i] == 1 && random(0, 100) < 50) { // 50% de probabilité de passer à l'état "éteint"
+                groupTargets[i] = 0;
+            }
+        }
+
+        // Activer de nouveaux groupes aléatoires
+        int activeGroups = 0;
+        for (int i = 0; i < MAXLEDLENGTH; i++) {
+            if (groupTargets[i] == 1) {
+                activeGroups++;
+            }
+        }
+
+        while (activeGroups < numGroups) {
+            int randomGroupStart = random(0, MAXLEDLENGTH);
+            int groupLength = random(1, 6); // Longueur aléatoire entre 1 et 5 pixels
+
+            if (groupTargets[randomGroupStart] == 0) {
+                groupTargets[randomGroupStart] = 1; // Passer à l'état "allumé"
+                groupLengths[randomGroupStart] = groupLength; // Assigner une longueur aléatoire
+                activeGroups++;
+            }
+        }
+    }
+
+    // Mettre à jour les intensités pour chaque groupe
+    for (int i = 0; i < MAXLEDLENGTH; i++) {
+        if (groupTargets[i] == 1) {
+            groupIntensities[i] = min(groupIntensities[i] + FADE_SPEED, 1.0); // Augmenter progressivement
+        } else {
+            groupIntensities[i] = max(groupIntensities[i] - FADE_SPEED, 0.0); // Diminuer progressivement
+        }
+
+        // Appliquer les couleurs pour les pixels dans chaque groupe
+        for (int j = 0; j < groupLengths[i]; j++) {
+            int pixelIndex = (i + j) % MAXLEDLENGTH; // Gérer les débordements
+            leds[pixelIndex].r = pixelColor.r * groupIntensities[i];
+            leds[pixelIndex].g = pixelColor.g * groupIntensities[i];
+            leds[pixelIndex].b = pixelColor.b * groupIntensities[i];
+        }
+    }
+
+    // Afficher les LEDs
+    FastLED.show();
+    break;
+}
+
+   
+
+  
 
   case 6: // individual rgb for each tubegroup 234 567 ...
     for (int j = 0; j < MAXLEDLENGTH * 3; j += 3)
@@ -320,8 +501,122 @@ void DMX2LEDSTRIP()
     }
     break;
 
+  // default:
+  // rgbcolor = convertToColor(dmxChannels[1]); // Couleur définie par le canal 2 (indexé à 1 dans dmxChannels)
+
+  //   ledDimmer = (double(dmxChannels[2]) / 255.0); // Intensité définie par le canal 3
+  //   segmentLength = setupMode; // Longueur du segment dépendant du mode (1, 2, 3 ou 4)
+
+  //   ir = rgbcolor.r * ledDimmer; // Rouge avec atténuation
+  //   ig = rgbcolor.g * ledDimmer; // Vert avec atténuation
+  //   ib = rgbcolor.b * ledDimmer; // Bleu avec atténuation
+
+  //   onLength = segmentLength;    // Longueur des segments allumés
+  //   offLength = segmentLength;   // Longueur des segments éteints
+
+  //   // Calcul de la vitesse symétrique
+  //   speedFactor = (double(dmxChannels[3]) - 127.5) / 127.5; // Plage de -1.0 à 1.0
+  //   fxSpeed = speedFactor * 1.0; // Ajustement pour une vitesse maximale raisonnable
+
+  //   // Mise à jour continue de l'offset (ajout de fxSpeed pour chaque boucle)
+  //   lastOffset += fxSpeed;
+  //   if (lastOffset >= (onLength + offLength)) {
+  //       lastOffset -= (onLength + offLength); // Limiter l'offset pour éviter de dépasser la plage
+  //   } else if (lastOffset < 0) {
+  //       lastOffset += (onLength + offLength); // Gérer les valeurs négatives
+  //   }
+
+  //   for (int j = 0; j < MAXLEDLENGTH; j++) {
+  //       double fadeFactor = 1.0; // Par défaut, pas d'atténuation
+
+  //       // Calcul de la position continue avec offset
+  //       double positionWithOffset = fmod(j + lastOffset, onLength + offLength);
+
+  //       // Vérifier si on est dans un segment allumé
+  //       if (positionWithOffset < onLength) {
+  //           double positionInSegment = positionWithOffset;
+
+  //           // Appliquer le fondu (fade) au début et à la fin du segment
+  //           if (positionInSegment < onLength * DEGRADE_FACTOR) {
+  //               fadeFactor = positionInSegment / (onLength * DEGRADE_FACTOR); // Début progressif
+  //           } else if (positionInSegment > onLength * (1.0 - DEGRADE_FACTOR)) {
+  //               fadeFactor = (onLength - positionInSegment) / (onLength * DEGRADE_FACTOR); // Fin décroissante
+  //           } else {
+  //               fadeFactor = 1.0; // Pleine intensité au centre
+  //           }
+
+  //           // Appliquer la couleur avec l'atténuation calculée
+  //           leds[j].r = ir * fadeFactor;
+  //           leds[j].g = ig * fadeFactor;
+  //           leds[j].b = ib * fadeFactor;
+  //       } else {
+  //           // LEDs dans le segment éteint
+  //           leds[j].r = 0;
+  //           leds[j].g = 0;
+  //           leds[j].b = 0;
+  //       }
+  //   }
+  //   break;
   default:
+    rgbcolor = convertToColor(dmxChannels[1]); // Couleur définie par le canal 2 (indexé à 1 dans dmxChannels)
+
+    ledDimmer = (double(dmxChannels[2]) / 255.0); // Intensité définie par le canal 3
+    segmentLength = setupMode; // Longueur du segment dépendant du mode (1, 2, 3 ou 4)
+
+    ir = rgbcolor.r * ledDimmer; // Rouge avec atténuation
+    ig = rgbcolor.g * ledDimmer; // Vert avec atténuation
+    ib = rgbcolor.b * ledDimmer; // Bleu avec atténuation
+
+    onLength = segmentLength;    // Longueur des segments allumés
+    offLength = segmentLength;   // Longueur des segments éteints
+
+    // Calcul de la vitesse symétrique
+    speedFactor = (double(dmxChannels[3]) - 127.5) / 127.5; // Plage de -1.0 à 1.0
+    fxSpeed = speedFactor * 1.0; // Ajustement pour une vitesse maximale raisonnable
+
+    // Calcul du décalage par groupe
+    double groupOffset = setupTubeNumber * segmentLength / 2.0; // Décalage basé sur le numéro de groupe
+
+    // Mise à jour continue de l'offset (ajout de fxSpeed pour chaque boucle)
+    lastOffset += fxSpeed;
+    if (lastOffset >= (onLength + offLength)) {
+        lastOffset -= (onLength + offLength); // Limiter l'offset pour éviter de dépasser la plage
+    } else if (lastOffset < 0) {
+        lastOffset += (onLength + offLength); // Gérer les valeurs négatives
+    }
+
+    for (int j = 0; j < MAXLEDLENGTH; j++) {
+        double fadeFactor = 1.0; // Par défaut, pas d'atténuation
+
+        // Calcul de la position continue avec offset, incluant le décalage par groupe
+        double positionWithOffset = fmod(j + lastOffset + groupOffset, onLength + offLength);
+
+        // Vérifier si on est dans un segment allumé
+        if (positionWithOffset < onLength) {
+            double positionInSegment = positionWithOffset;
+
+            // Appliquer le fondu (fade) au début et à la fin du segment
+            if (positionInSegment < onLength * DEGRADE_FACTOR) {
+                fadeFactor = positionInSegment / (onLength * DEGRADE_FACTOR); // Début progressif
+            } else if (positionInSegment > onLength * (1.0 - DEGRADE_FACTOR)) {
+                fadeFactor = (onLength - positionInSegment) / (onLength * DEGRADE_FACTOR); // Fin décroissante
+            } else {
+                fadeFactor = 1.0; // Pleine intensité au centre
+            }
+
+            // Appliquer la couleur avec l'atténuation calculée
+            leds[j].r = ir * fadeFactor;
+            leds[j].g = ig * fadeFactor;
+            leds[j].b = ib * fadeFactor;
+        } else {
+            // LEDs dans le segment éteint
+            leds[j].r = 0;
+            leds[j].g = 0;
+            leds[j].b = 0;
+        }
+    }
     break;
+
   }
 
   FastLED.show();
@@ -356,7 +651,7 @@ void longPressStart1()
 
 void setup()
 {
-
+  randomHueOffset = rand()%256;
   Serial.begin(115200);
   Serial.println("");
   Serial.print("Version ");
