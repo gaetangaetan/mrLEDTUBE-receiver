@@ -21,12 +21,16 @@ Pour plus de fonctionnalités, programmez vos propre modes dans la fonction DMX2
 Fonctionnement :
 Le canal DMX 1 précise le mode:
 Mode 0 : tous les pixels prennent la même valeur rgb représentée dans les canaux 2 3 4
-Mode 1 : tirets défilants. Canaux 1 COLOR (codée sur un byte) + 2 DIMMER + 3 SPEED
-Mode 2 3 4 : idem avec des segments de plus en plus longts
-Mode 5 : pixels individuels. Les deux premiers canaux permettent de contrôler des groupes de pixels et de les espacer. 1 pixellength + 2 pixelgap + 3 dimmer + 567 rgb pixel1 + 8 9 10 rgb pixel2 ...
+Mode 1 : rainbow | canal 2 = l'offset ajouté à chaque tube selon son groupe (0=tubes identiques) | canal 3 = rapprochement des couleurs | canal 4 = vitesse de défilement dans un sens ou dans l'autre (127=immobile)
+Mode 2 : idem avec un dimmer sur le canal 5 (le déplacement ne fonctionne plus -> à débugger)
+Mode 3 : random pixels | 3 canaux : couleur, nombre de pixels allumés, vitesse
+Mode 4 : idem avec fondu
+Mode 5 : idem par groupes de 1 à 5 pixels
 Mode 6 : chaque groupe utilise un triplet de valeurs RGB pour tous ses pixels (par exemple, le groupe 7 utilisera les valeurs rgb représentée par les canaux 19 20 21)
+Mode 7 à 254: tirets | 4 canaux : 1 longueur, 2 couleur, 3 intensité, 4 vitesse
 Mode 255 : affiche le numéro de groupe
 
+remarque : le 04122024, j'ai réécrit tous les modes sauf les modes 0, 6 et 255 avec l'aide de chatgpt
 
 SETUP (clic long pour y accéder ou en sortir) : réglage du numéro de groupe
 Le nombre de LEDS correspondant au numéro de groupe clignote
@@ -39,6 +43,9 @@ Le numéro de groupe est enregistré en EEPROM
 
 #define MAXLEDLENGTH 144 // longueur du strip led // en général, la longueur n'a pas particulièrement d'influence sur la latence du contrôleur mais ça peut être utile de la régler pour les programmes qui font le "tour"
                          // du strip led (comme des segments de leds qui vont de bas en haut par exemple) ou pour être sûr de ne pas demander plus de courant que ce que l'alimentation prévue ne peut fournir
+
+#define DEGRADE_FACTOR 0.5 // chatgpt - Proportion du segment utilisée pour le dégradé (0.5 = moitié du segment)
+#define FADE_SPEED 0.02 // chatgpt -  Vitesse de transition : plus petit = transitions plus longues
 
 // #define MAXLEDLENGTH 10 // durant la programmation du code, pour les essais, si le ledstrip est alimenté via l'ESP, on se limite à quelques leds (pour ne pas le brûler)
 
@@ -167,25 +174,13 @@ Color convertToColor(uint8_t index)
 }
 
 // Contrôle du ledstrip proprement dit, en fonction des valeurs DMX
-/*
-Remarque : le tableau contenant les valeurs "dmxChannels" est indexé de 0 à 511 alors que les canaux DMX sont numérotés de 1 à 512. C'est la faute des créateurs du DMX, pas la mienne
-Le canal 1 règle le mode de fonctionnement
-Mode 0 : tous les pixels prennent la même valeur rgb représentée dans les canaux 2 3 4
-Mode 1 : tirets défilants. Canaux 1 COLOR (codée sur un byte) + 2 DIMMER + 3 SPEED
-Mode 2 3 4 : idem avec des segments de plus en plus longts
-Mode 5 : pixels individuels. Les deux premiers canaux permettent de contrôler des groupes de pixels et de les espacer. 1 pixellength + 2 pixelgap + 3 dimmer + 567 rgb pixel1 + 8 9 10 rgb pixel2 ...
-Mode 6 : chaque groupe utilise un triplet de valeurs RGB pour tous ses pixels (par exemple, le groupe 7 utilisera les valeurs rgb représentée par les canaux 19 20 21)
-Mode 255 : affiche le numéro de groupe
-
-*/
-
 
 void DMX2LEDSTRIP()
 {
 
   FastLED.clear();
 
-  setupMode = dmxChannels[0];
+  setupMode = dmxChannels[0]; // le canal 1 précise le mode des ledstrips
 
   double ledDimmer;
   double ledDimmerIncrement;
@@ -206,8 +201,8 @@ void DMX2LEDSTRIP()
   int segmentLength;
 
   Color rgbcolor;
-            // Offset pour le défilement du dégradé
-  
+
+// Offset pour le défilement du dégradé  
 if (setupMode != 1) {
     hueOffset = 0;
 } 
@@ -226,7 +221,7 @@ if (setupMode != 1) {
     break;
 
   
-#define DEGRADE_FACTOR 0.5 // Proportion du segment utilisée pour le dégradé (0.5 = moitié du segment)
+
 
 
 
@@ -340,7 +335,7 @@ case 3: // Mode scintillement aléatoire
     break;
 }
 
-#define FADE_SPEED 0.02 // Vitesse de transition : plus petit = transitions plus longues
+
 
 case 4: // Mode scintillement progressif
 {
@@ -502,62 +497,7 @@ case 5: // Mode scintillement progressif par groupes
     }
     break;
 
-  // default:
-  // rgbcolor = convertToColor(dmxChannels[1]); // Couleur définie par le canal 2 (indexé à 1 dans dmxChannels)
-
-  //   ledDimmer = (double(dmxChannels[2]) / 255.0); // Intensité définie par le canal 3
-  //   segmentLength = setupMode; // Longueur du segment dépendant du mode (1, 2, 3 ou 4)
-
-  //   ir = rgbcolor.r * ledDimmer; // Rouge avec atténuation
-  //   ig = rgbcolor.g * ledDimmer; // Vert avec atténuation
-  //   ib = rgbcolor.b * ledDimmer; // Bleu avec atténuation
-
-  //   onLength = segmentLength;    // Longueur des segments allumés
-  //   offLength = segmentLength;   // Longueur des segments éteints
-
-  //   // Calcul de la vitesse symétrique
-  //   speedFactor = (double(dmxChannels[3]) - 127.5) / 127.5; // Plage de -1.0 à 1.0
-  //   fxSpeed = speedFactor * 1.0; // Ajustement pour une vitesse maximale raisonnable
-
-  //   // Mise à jour continue de l'offset (ajout de fxSpeed pour chaque boucle)
-  //   lastOffset += fxSpeed;
-  //   if (lastOffset >= (onLength + offLength)) {
-  //       lastOffset -= (onLength + offLength); // Limiter l'offset pour éviter de dépasser la plage
-  //   } else if (lastOffset < 0) {
-  //       lastOffset += (onLength + offLength); // Gérer les valeurs négatives
-  //   }
-
-  //   for (int j = 0; j < MAXLEDLENGTH; j++) {
-  //       double fadeFactor = 1.0; // Par défaut, pas d'atténuation
-
-  //       // Calcul de la position continue avec offset
-  //       double positionWithOffset = fmod(j + lastOffset, onLength + offLength);
-
-  //       // Vérifier si on est dans un segment allumé
-  //       if (positionWithOffset < onLength) {
-  //           double positionInSegment = positionWithOffset;
-
-  //           // Appliquer le fondu (fade) au début et à la fin du segment
-  //           if (positionInSegment < onLength * DEGRADE_FACTOR) {
-  //               fadeFactor = positionInSegment / (onLength * DEGRADE_FACTOR); // Début progressif
-  //           } else if (positionInSegment > onLength * (1.0 - DEGRADE_FACTOR)) {
-  //               fadeFactor = (onLength - positionInSegment) / (onLength * DEGRADE_FACTOR); // Fin décroissante
-  //           } else {
-  //               fadeFactor = 1.0; // Pleine intensité au centre
-  //           }
-
-  //           // Appliquer la couleur avec l'atténuation calculée
-  //           leds[j].r = ir * fadeFactor;
-  //           leds[j].g = ig * fadeFactor;
-  //           leds[j].b = ib * fadeFactor;
-  //       } else {
-  //           // LEDs dans le segment éteint
-  //           leds[j].r = 0;
-  //           leds[j].g = 0;
-  //           leds[j].b = 0;
-  //       }
-  //   }
-  //   break;
+ 
   default:
     rgbcolor = convertToColor(dmxChannels[1]); // Couleur définie par le canal 2 (indexé à 1 dans dmxChannels)
 
