@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"path": "../../../../mrLedstrip-receiver/mrLEDTUBE-receiver"
+		},
+		{
+			"name": "philibert_jack",
+			"path": "../philibert_jack"
+		},
+		{
+			"name": "Denis Rochez",
+			"path": "../Denis Rochez"
+		}
+	],
+	"settings": {}
+}

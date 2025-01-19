@@ -1,39 +1,59 @@
 /*
-Après révision des modes 
+
 Ce code fait partie d'un système de contrôle DMX sans fil pour ledstrip.
 
-Le système est composé d'un émetteur qui dispose d'une entrée DMX et transmet les valeurs des 512 canaux à tous les récepteurs du système.
+Le système est composé d'un émetteur qui dispose d'une entrée DMX (XLR 3 pins) et transmet les valeurs des 512 canaux à tous les récepteurs du système.
 
 Le code qui suit sert à programmer les récepteurs.
 
-Les contrôleurs utilisés sont des ESP8266 (Wemos D1 mini) pour les récepteurs et un ESP32 pour l'émetteur mais l'un comme l'autre fonctionnent sur les cartes, il faut juste adapter quelques lignes pour utiliser
-ESP-NOW. Il n'y a pas de raison particulière à ce que l'émetteur utilise un ESP32 (je crois que c'est juste ce que j'avais sous la main quand je l'ai programmé)
+Les contrôleurs utilisés sont 
+- des ESP8266 (Wemos D1 mini) pour les récepteurs 
+- et un ESP32 pour l'émetteur 
 
-Il utilise un bouton pour pouvoir régler le numéro de groupe (voir modes de programmation) mais on peut très bien modifier quelques lignes pour que le numéro de groupe soit fixe
+mais l'un comme l'autre fonctionnent sur les deux types de cartes, il faut juste adapter quelques lignes pour passer d'une carte à l'autre (essentiellement en ce qui concerne l'utilisation de ESP-NOW). 
 
-L'émetteur envoie 512 canaux DMX (par paquets de 128 canaux) et peut être décalé (il peut commencer à l'adresse 1 ou à n'importe quelle autre adresse). Si les adresses sont décalées,
-cela est totalement transparent du point de vue du récepteur. Quand on parle de la première adresse dans le code du récepteur, il s'agit de la première adresse des 512 valeurs qu'il reçoit, 
+Il n'y a pas de raison particulière à ce que l'émetteur utilise un ESP32 (je crois que c'est juste ce que j'avais sous la main quand je l'ai programmé)
+L'émetteur comprend un bouton pour pouvoir régler le numéro de groupe (cf. modes de programmation) mais on peut très bien modifier quelques lignes pour que le numéro de groupe soit fixe
+
+L'émetteur envoie 512 canaux DMX (par paquets de 128 canaux) et peut être décalé en modifiant la valeur de la variable "offsetDMXaddress" (qui vaut 0 par défaut)
+
+Par exemple :
+- si offsetDMXaddress vaut 0, la valeur à l'adresse 1 du récepteur DMX est envoyée à l'adresse 1 du récepteur
+- si offsetDMXaddress vaut 240, la valeur à l'adresse 1 du récepteur DMX est envoyée à l'adresse 241 du récepteur
+
+Si les adresses sont décalées, cela est totalement transparent du point de vue du récepteur. 
+Quand on parle de la première adresse dans le code du récepteur, il s'agit de la première adresse des 512 valeurs qu'il reçoit, 
 qu'importe le vrai canal DMX auquel cela correspond.
 
-Quelques modes ont été programmés mais vu que j'utilise pratiquement uniquement le mode 6 (chaque groupe contrôlé sur trois canaux, en rgb), je n'ai pas passé un temps dingue là-dessus.
+Quelques modes ont été programmés mais vu que j'utilise essentiellement le mode 6 (chaque groupe contrôlé sur trois canaux, en rgb), je n'ai pas passé un temps dingue là-dessus.
 Pour plus de fonctionnalités, programmez vos propre modes dans la fonction DMX2LEDSTRIP
 
 Fonctionnement :
 Le canal DMX 1 précise le mode:
-Mode 0 : tous les pixels prennent la même valeur rgb représentée dans les canaux 2 3 4
-Mode 1 : rainbow | canal 2 = l'offset ajouté à chaque tube selon son groupe (0=tubes identiques) | canal 3 = rapprochement des couleurs | canal 4 = vitesse de défilement dans un sens ou dans l'autre (127=immobile)
-Mode 2 : idem avec un dimmer sur le canal 5 (le déplacement ne fonctionne plus -> à débugger)
-Mode 3 : random pixels | 3 canaux : couleur, nombre de pixels allumés, vitesse
-Mode 4 : idem avec fondu
-Mode 5 : idem par groupes de 1 à 5 pixels
-Mode 6 : chaque groupe utilise un triplet de valeurs RGB pour tous ses pixels (par exemple, le groupe 7 utilisera les valeurs rgb représentée par les canaux 19 20 21)
-Mode 7 à 254: tirets | 4 canaux : 1 longueur, 2 couleur, 3 intensité, 4 vitesse
-Mode 255 : affiche le numéro de groupe
+Mode = 0 : tous les pixels prennent la même valeur rgb représentée dans les canaux 2 3 4
+Mode = 1 : rainbow | canal 2 = l'offset ajouté à chaque tube selon son groupe (0=tubes identiques) | canal 3 = rapprochement des couleurs | canal 4 = vitesse de défilement dans un sens ou dans l'autre (127=immobile)
+Mode = 2 : idem avec un dimmer sur le canal 5 (le déplacement ne fonctionne plus -> à débugger)
+Mode = 3 : random pixels | 3 canaux : couleur, nombre de pixels allumés, vitesse
+Mode = 4 : idem avec fondu
+Mode = 5 : idem par groupes de 1 à 5 pixels
+Mode = 6 : rgb par grouope : chaque groupe utilise un 3 adresse pour une couleur RGB pour tous ses pixels (par exemple, le groupe 0 utilisera les adresses 2 3 4 pour ses valeurs RGB, le groupe 1 utilisera les adresses 5 6 7, ...)
+// la numérotation des groupes commence à 0 (désolé, réflexe d'informaticien...)
+Mode = 7 : "grésillement lumineux" : 
+  adresse 2 = synchro des groupes : 0 = même couleur, même grésillement | 1 = même couleur, grésillements indépendants | 2 = couleurs indépendantes, grésillements synchros | 3 = couleurs indépendantes, grésillements indépendants
+  adresse 3 = segment entier (0) ou segments aléatoires (1)
+  adresse 4 = intensité maximale
+  adresse 5 = densité de pixels allumés (mode segments aléatoires)
+  adresse 6 = retroupement des segments de pixels éteints (longueur moyenne des segments éteints)
+  adresse 7 8 9 = couleur rgb
+  les fonctions des adresses 3 à 9 se répètent (7 canaux pour chaque groupe)
+  
+Mode = 8 à 254: tirets | 4 canaux : 1 longueur, 2 couleur, 3 intensité, 4 vitesse
+Mode = 255 : affiche le numéro de groupe (des pixels espacés permettent de facilement voir le numéro du groupe, 7 pixels allumés= groupe 7)
 
 remarque : le 04122024, j'ai réécrit tous les modes sauf les modes 0, 6 et 255 avec l'aide de chatgpt
 
 SETUP (clic long pour y accéder ou en sortir) : réglage du numéro de groupe
-Le nombre de LEDS correspondant au numéro de groupe clignote
+Un certain nombre de LEDS correspondant au numéro de groupe clignotent en vert (si une seule led clignote en rouge, il s'agit du groupe 0 )
 Le numéro de groupe est enregistré en EEPROM
 */
 
@@ -41,42 +61,50 @@ Le numéro de groupe est enregistré en EEPROM
 #define BUTTONPIN D1       // on définit le pin positif du bouton (il s'agit d'un pullup, quand le bouton est relevé, la valeur du pin est HIGH, quand le bouton est enfoncé, le contact au GND est fait et la valeur est donc LOW)
 #define BUTTONGROUNDPIN D5 // pour faciliter le montage, on utilise une pin pour fournir le GND au bouton
 
-#define MAXLEDLENGTH 144 // longueur du strip led // en général, la longueur n'a pas particulièrement d'influence sur la latence du contrôleur mais ça peut être utile de la régler pour les programmes qui font le "tour"
-                         // du strip led (comme des segments de leds qui vont de bas en haut par exemple) ou pour être sûr de ne pas demander plus de courant que ce que l'alimentation prévue ne peut fournir
+#define MAXLEDLENGTH 144  // longueur du strip led 
+                          
+                          // !!!  QUAND LE STRIP LED EST ALIMENTÉ PAR L'ESP (en cours de programmation, par exemple), NE PAS ALLUMER PLUS D'UNE DIZAINE DE LEDS !!!
+                          
+                          // en général, la longueur n'a pas particulièrement d'influence sur la latence du contrôleur mais ça peut être utile de la régler pour les programmes qui font le "tour"
+                          // du strip led (comme des segments de leds qui vont de bas en haut par exemple) 
+                          // ou pour être sûr de ne pas demander plus de courant que ce que l'alimentation prévue ne peut fournir
+                          
+
+#define NBGROUPS 10 // nombre de groupes possibles (cf. modes de fonctionnement)
 
 #define DEGRADE_FACTOR 0.5 // chatgpt - Proportion du segment utilisée pour le dégradé (0.5 = moitié du segment)
 #define FADE_SPEED 0.02 // chatgpt -  Vitesse de transition : plus petit = transitions plus longues
 
-// #define MAXLEDLENGTH 10 // durant la programmation du code, pour les essais, si le ledstrip est alimenté via l'ESP, on se limite à quelques leds (pour ne pas le brûler)
 
 #include <Arduino.h>
 #include <EEPROM.h>
-#include <ESP8266WiFi.h> //https://github.com/esp8266/Arduino
+#include <ESP8266WiFi.h>
 
 #include <ESP8266HTTPClient.h>
 #include <ESP8266httpUpdate.h>
 
-// needed for library
+
 #include <DNSServer.h>
 #include <ESP8266WebServer.h>
-#include <WiFiManager.h> //https://github.com/tzapu/WiFiManager
+#include <WiFiManager.h> 
 WiFiManager wifiManager;
 #define APNAME "mrLEDTUBE15"
-#define VERSION 15
+#define VERSION 15 // numéro de version pour m'y retrouver pendant le développement
 
 #define EEPROM_SIZE 32
 
 #include <FastLED.h>
 
-CRGB leds[MAXLEDLENGTH];
-uint8_t ledsTemp[MAXLEDLENGTH][3];
+CRGB leds[MAXLEDLENGTH]; // objet représentant le ledstrip
+uint8_t ledsTemp[MAXLEDLENGTH][3]; // tableau représentant les valeurs r g b de chaque led du ledstrip
 
 #include "OneButton.h"
-OneButton button1(BUTTONPIN, true);
-// Setup a new OneButton on pin BUTTONPIN.
+OneButton button1(BUTTONPIN, true); // Setup a new OneButton on pin BUTTONPIN.
 
 #include <ESP8266WiFiMulti.h>
-#include <espnow.h>
+#include <espnow.h> 
+// library permettant d'utiliser le protocole de communication sans fil propriétaire d'Espressif (faire "comme du wifi" sans passer par toutes les couches du wifi)
+// exemple : https://randomnerdtutorials.com/esp-now-esp32-arduino-ide/
 
 int setupAddress = 1;
 int setupMode = 1;
@@ -107,18 +135,20 @@ bool etat = RUNNING; // etat peut être en mode SETUP ou RUNNING : pour entrer o
 int flashInterval;
 
 uint8_t dmxChannels[512]; // tableau dans lequel seront stockées les valeurs des 512 canaux DMX
+                          // les éléments 0 à 511 représentent les valeurs DMX de 1 à 512. Éternelle bataille des gens qui commencent la numérotation à 0 et ceux qui commencent à 1. Perso, je trouve qu'on devrait toujours commencer à 0 mais bon... ;)
 
-typedef struct struct_dmx_packet
-{
-  uint8_t blockNumber; // on divise les 512 adresses en 4 blocs de 128 adresses (on ne peut pas tout envoyer en une fois car la taille maximale des packets transmis par ESP-NOW est limitée à 250 bytes)
-  uint8_t dmxvalues[128];
+typedef struct struct_dmx_packet // on divise les 512 adresses en 4 blocs de 128 adresses (on ne peut pas tout envoyer en une fois car la taille maximale des packets transmis par ESP-NOW est limitée à 250 bytes)
+{                                
+  uint8_t blockNumber;    // 4 blocs
+  uint8_t dmxvalues[128]; // de 128 valeurs
 } struct_dmx_packet;
 
-struct_dmx_packet incomingDMXPacket;
+struct_dmx_packet incomingDMXPacket; 
 
-void OnDataSent(u8 *mac_addr, u8 status) {} // la fonction OnDataSent doit être déclarée mais concrètement on n'en a pas besoin (pour l'instant, aucune donnée n'est renvoyée par les récepteurs à l'émetteur)
+void OnDataSent(u8 *mac_addr, u8 status) {} // quand on utilise ESP_NOW, la fonction OnDataSent doit être déclarée mais, concrètement, on n'en a pas besoin (pour l'instant, aucune donnée n'est renvoyée par les récepteurs à l'émetteur)
 
 // Callback when data is received
+// à chaque fois qu'un bloc de 128 valeurs est reçu par ESP_NOW, on met à jour ces valeurs dans le tableau dmxChannels 
 void OnDataRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len)
 {
   memcpy(&incomingDMXPacket, incomingData, sizeof(incomingDMXPacket));
@@ -129,14 +159,6 @@ void OnDataRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len)
   }
 }
 
-double mrdoublemodulo(double nombre, double diviseur) // je ne sais plus pourquoi j'avais besoin d'une opération modulo sur des doubles, ce qui n'existe pas de base, apparemment
-{
-  while (nombre < 0)
-    nombre += diviseur;
-  while (nombre >= diviseur)
-    nombre -= diviseur;
-  return nombre;
-}
 
 struct Color
 { // type utilisé par la fonction convertToColor
@@ -146,7 +168,7 @@ struct Color
 };
 
 Color convertToColor(uint8_t index)
-{ // fonction permettant de mapper 256 couleurs de manière continue sur 255 valeurs (pour pouvoir utilier un seul canal DMX pour la couleur dans certains modes)
+{ // fonction permettant de mapper les couleurs de manière continue sur 256 valeurs (pour pouvoir utilier un seul canal DMX pour représenter une couleur dans certains modes)
   Color color;
 
   if (index < 85)
@@ -174,7 +196,8 @@ Color convertToColor(uint8_t index)
 }
 
 // Contrôle du ledstrip proprement dit, en fonction des valeurs DMX
-
+// !!! POUR AJOUTER UN MODE !!!
+// Il suffit d'ajouter un bloc "CASE"
 void DMX2LEDSTRIP()
 {
 
@@ -202,7 +225,7 @@ void DMX2LEDSTRIP()
 
   Color rgbcolor;
 
-// Offset pour le défilement du dégradé  
+// Offset utilisé par plusieurs modes
 if (setupMode != 1) {
     hueOffset = 0;
 } 
@@ -210,7 +233,7 @@ if (setupMode != 1) {
 
   switch (setupMode)
   {
-  case 0: // 123 RGB for all strip at once
+  case 0: // Une seule couleur pour tous les pixels et tous les groupes. Les canaux 2 3 4 représentent les composantes R G B
 
     for (int j = 0; j < MAXLEDLENGTH; j++)
     {
@@ -479,13 +502,19 @@ case 5: // Mode scintillement progressif par groupes
 
   
 
-  case 6: // individual rgb for each tubegroup 234 567 ...
+  case 6: // Chaque groupe a une couleur unique pour tous ses pixels. Cette couleur est définie par trois canaux représentant ses valeurs RGB. 
+         // Groupe 0 : RGB = 2 3 4, groupe 1 : RGB = 5 6 7, etc. 
     for (int j = 0; j < MAXLEDLENGTH * 3; j += 3)
     {
       leds[j / 3].r = dmxChannels[ir];
       leds[j / 3].g = dmxChannels[ig];
       leds[j / 3].b = dmxChannels[ib];
     }
+    break;
+
+  case 7: // "grésillements lumineux"
+
+    // à implémenter avec chatGPT
     break;
 
   case 255: // affichage du numéro de groupe
@@ -498,11 +527,13 @@ case 5: // Mode scintillement progressif par groupes
     break;
 
  
-  default:
-    rgbcolor = convertToColor(dmxChannels[1]); // Couleur définie par le canal 2 (indexé à 1 dans dmxChannels)
+  default: // Si aucun mode n'est explicitement défini pour la valeur dmxChannels[0] actuelle, on tombe sur le mode par défaut : segment de longueur, couleur, intensité, vitesse de déplacement contrôlés par les adresses 1 2 3 4
+    
+    segmentLength = setupMode; // Longueur du segment définie par le canal 1
+    rgbcolor = convertToColor(dmxChannels[1]); // Couleur définie par le canal 2 
 
     ledDimmer = (double(dmxChannels[2]) / 255.0); // Intensité définie par le canal 3
-    segmentLength = setupMode; // Longueur du segment dépendant du mode (1, 2, 3 ou 4)
+    
 
     ir = rgbcolor.r * ledDimmer; // Rouge avec atténuation
     ig = rgbcolor.g * ledDimmer; // Vert avec atténuation
@@ -565,15 +596,14 @@ case 5: // Mode scintillement progressif par groupes
 }
 
 // ----- button 1 callback functions
-
-void click1()
-{ // incrémente le numéro de groupe
+void click1() // en mode SETUP, chaque clic simple sur le bouton incrémente le numéro de groupe
+{
   if (etat == RUNNING)
     return; // en mode RUNNING, on ignore cette action
-  setupTubeNumber = (setupTubeNumber + 1) % 10;
+  setupTubeNumber = (setupTubeNumber + 1) % NBGROUPS;
 }
 
-void longPressStart1()
+void longPressStart1() // un clic long, permet de passer de RUNNING à SETUP et inversement (à la sortie du mode SETUP, on enregistre les données en mémoire persistante)
 {
   Serial.print("longpress | etat = ");
   Serial.println((etat ? "RUNNING" : "SETUP"));
@@ -587,7 +617,7 @@ void longPressStart1()
     Serial.println(EEPROM.commit());
   }
 
-  etat = !etat; // on passe de RUNNING à SETUP ou inversement
+  etat = !etat;
 }
 
 void setup()
@@ -598,13 +628,13 @@ void setup()
   Serial.print("Version ");
   Serial.println(VERSION);
 
-  pinMode(BUTTONGROUNDPIN, OUTPUT);
+  pinMode(BUTTONGROUNDPIN, OUTPUT); 
   digitalWrite(BUTTONGROUNDPIN, LOW); // on utilise BUTTONGROUNDPIN comme GND pour le bouton 1
 
-  FastLED.addLeds<WS2812, DATA_PIN, GRB>(leds, MAXLEDLENGTH); // GRB ordering is typical
+  FastLED.addLeds<WS2812, DATA_PIN, GRB>(leds, MAXLEDLENGTH); // Création d'un objet représentant le ledstrip pour FastLED // GRB ordering is typical
 
   WiFi.disconnect();
-  ESP.eraseConfig();
+  ESP.eraseConfig(); // !!! COMMANDES IMPORTANTES !!! ESP_NOW peut parfois ne pas fonctionner si on n'exécute pas pas ces deux commandes. Je ne suis pas sûr que ce soit écrit dans la doc. C'est peut-être même un petit bug. Bref, il faut le savoir :)
 
   // Wifi STA Mode
   WiFi.mode(WIFI_STA);
@@ -649,13 +679,13 @@ void setup()
   Serial.println(setupTubeNumber);
 }
 
-void loop()
+void loop() 
 {
-  button1.tick();
+  button1.tick(); // fonction vérifiant l'état du bouton
 
   if (etat == RUNNING)
   {
-    DMX2LEDSTRIP();
+    DMX2LEDSTRIP(); // on met à jour l'affichage du ledstrip
   }
   else // etat==SETUP -> on fait clignoter un nombre de LEDs correspondant au groupe du tube
   {
@@ -664,15 +694,14 @@ void loop()
       leds[0].r = 250; // pour le groupe 0, on fait clignoter la première led en rouge
     else
     {
-      for (int j = 1; j <= 10 * setupTubeNumber; j += 10)
+      for (int j = 1; j <= NBGROUPS * setupTubeNumber; j += NBGROUPS) // pour un groupe n (différent de 0), on fait clignotter n leds en vert
       {
         leds[j].r = 0;
         leds[j].g = 250;
         leds[j].b = 0;
       }
     }
-
-    FastLED.show();
+    FastLED.show(); // les cinq lignes suivantes produisent un clignottement (200ms)
     delay(100);
     FastLED.clear();
     FastLED.show();
