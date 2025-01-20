@@ -38,7 +38,15 @@ Mode = 4 : idem avec fondu
 Mode = 5 : idem par groupes de 1 à 5 pixels
 Mode = 6 : rgb par grouope : chaque groupe utilise un 3 adresse pour une couleur RGB pour tous ses pixels (par exemple, le groupe 0 utilisera les adresses 2 3 4 pour ses valeurs RGB, le groupe 1 utilisera les adresses 5 6 7, ...)
 // la numérotation des groupes commence à 0 (désolé, réflexe d'informaticien...)
-Mode = 7 : "grésillement lumineux" : 
+Mode = 7 : "grésillement lumineux" : // 2 couleur unie ou par groupe 
+// 3 longueur minimale 
+// 4 longueur maximale 
+// 5 durée d'une séquence de flickering 
+// 6 durée d'une séquence éteinte 
+// 7 durée d'un flicker individuel 
+// 8 vitesse changement de pattern (pas encore utilisé ici) 
+// 9 10 11 rgb grp0 | 12 13 14 rgb grp1 | etc.
+Mode = 8, 9, 10, 11 : presets de flickering (pas de paramètres)
  
 Mode = 8 à 254: tirets | 4 canaux : 1 longueur, 2 couleur, 3 intensité, 4 vitesse
 Mode = 255 : affiche le numéro de groupe (des pixels espacés permettent de facilement voir le numéro du groupe, 7 pixels allumés= groupe 7)
@@ -115,6 +123,10 @@ double offsetInc = 0.1;
 double offsetIncR = 0.1;
 double offsetIncG = 0.1;
 double offsetIncB = 0.1;
+
+uint8_t tempr =0;
+uint8_t tempg =0;
+uint8_t tempb =0;
 
 unsigned long lastFlicker = 0;
 unsigned long debutAllume= 0;
@@ -193,6 +205,108 @@ Color convertToColor(uint8_t index)
   return color;
 }
 
+
+void flickering(uint8_t dmx1, uint8_t dmx2, uint8_t dmx3, uint8_t dmx4, uint8_t dmx5, uint8_t dmx6, uint8_t dmx7, uint8_t dmx8,uint8_t dmx9,uint8_t dmx10)
+{
+  // "grésillement lumineux"
+// 2 couleur unie ou par groupe 
+// 3 longueur minimale 
+// 4 longueur maximale 
+// 5 durée d'une séquence de flickering 
+// 6 durée d'une séquence éteinte 
+// 7 durée d'un flicker individuel 
+// 8 vitesse changement de pattern (pas encore utilisé ici) 
+// 9 10 11 rgb grp0 | 12 13 14 rgb grp1 | etc.
+{
+  // 1) Choix des canaux RGB selon "couleur unie (0)" ou "par groupe (1)"
+
+  // 2) Calcul des longueurs mini/maxi pour la construction de segments
+  int minimumSegmentLength = max(1, (dmx2* MAXLEDLENGTH) / 255);
+  int maximumSegmentLength = max(1, (dmx3 * MAXLEDLENGTH) / 255);
+  // Si jamais le max < min, on les inverse
+  if (maximumSegmentLength < minimumSegmentLength) {
+    int temp = maximumSegmentLength;
+    maximumSegmentLength = minimumSegmentLength;
+    minimumSegmentLength = temp;
+  }
+
+  // 3) Durée entre deux régénérations de pattern
+  unsigned long dureeFlickerPattern = random(1, 100UL * dmx7);
+
+  // => Régénération du pattern si on a dépassé cette durée
+  if (millis() - lastUpdateFlickerPattern >= dureeFlickerPattern) {
+    lastUpdateFlickerPattern = millis();
+
+    // On construit un nouveau "pattern" de segments allumés/éteints dans flickerLeds[]
+    bool allumeSegment = (random(2) == 1);  // random(2) => 0 ou 1
+    for (int j = 0; j < MAXLEDLENGTH; ) {
+      int segLen = random(minimumSegmentLength, maximumSegmentLength);
+      // On s’assure de ne pas dépasser la fin du strip
+      if (j + segLen > MAXLEDLENGTH) {
+        segLen = MAXLEDLENGTH - j; 
+      }
+
+      // On remplit segLen pixels
+      for (int k = 0; k < segLen; k++) {
+        if (allumeSegment) {
+          flickerLeds[j + k].r = dmx8;
+          flickerLeds[j + k].g = dmx9;
+          flickerLeds[j + k].b = dmx10;
+        } else {
+          flickerLeds[j + k] = CRGB::Black;
+        }
+      }
+
+      // On alterne la phase (allumé/éteint)
+      allumeSegment = !allumeSegment;
+
+      // Avance de segLen
+      j += segLen;
+    }
+  }
+
+  // 4) Paramètres de la partie “flickering bloquant”
+  unsigned long dureeAllume = random(5UL * dmx4, 10UL * dmx4);   // temps pendant lequel on va faire des flickers on/off
+  unsigned long dureeEteint = random(5UL * dmx5, 10UL * dmx5);   // temps “éteint”
+  unsigned long flickerMin  =  dmx6/10;   // min du flicker
+  unsigned long flickerMax  =  dmx6;   // max du flicker
+
+  // On “bloque” le programme pour ce temps-là
+  debutAllume = millis();
+  while (millis() - debutAllume <= dureeAllume) {
+    // A chaque tour, on choisit une durée de flicker
+    lastFlicker = millis();
+    unsigned long dureeFlicker = random(flickerMin, flickerMax + 1);
+
+    // On alterne allumé / éteint 
+    static bool isOn = false;
+    isOn = !isOn;
+
+    if (isOn) {
+      // On copie le pattern calculé dans flickerLeds[]
+      for (int i = 0; i < MAXLEDLENGTH; i++) {
+        leds[i] = flickerLeds[i];
+      }
+    } else {
+      FastLED.clear();
+    }
+    FastLED.show();
+
+    // On attend la fin du petit flicker
+    while (millis() - lastFlicker < dureeFlicker) {
+      delay(1);  
+    }
+  }
+
+  // 5) Ensuite, on reste éteint un temps aléatoire dans [dureeEteint/2..dureeEteint]
+  if (dureeEteint > 0) {
+    delay(random(dureeEteint / 2, dureeEteint));
+  }
+  
+}
+}
+
+
 // Contrôle du ledstrip proprement dit, en fonction des valeurs DMX
 // !!! POUR AJOUTER UN MODE !!!
 // Il suffit d'ajouter un bloc "CASE"
@@ -204,17 +318,10 @@ void DMX2LEDSTRIP()
   setupMode = dmxChannels[0]; // le canal 1 précise le mode des ledstrips
 
   double ledDimmer;
-  double ledDimmerIncrement;
   int onLength;
   int offLength;
-  int intoffset;
   double fxSpeed;
-
   double speedFactor;
-
-  int pixelLength = 1;
-  int pixelGap = 0;
-
   int ir = 3 * setupTubeNumber + 1;
   int ig = 3 * setupTubeNumber + 2;
   int ib = 3 * setupTubeNumber + 3;
@@ -510,230 +617,37 @@ case 5: // Mode scintillement progressif par groupes
     }
     break;
 
-// case 7: // "grésillement lumineux"
-// // 2 couleur unie ou par groupe | 3 longueur minimale | 4 longueur maximale | 5 durée d'une séquence de flickering | 6 durée d'une séquence éteinte | 7 durée d'un flicker individuel | 8 vitesse changement de pattern | 9 10 11 rgb grp 0  | 12 13 14 rgb grp2 ...
-// {  
-//   if(dmxChannels[1]==0) 
-//   {
-//     ir = 9;
-//     ig = 10;
-//     ib = 11;    
-//   }
-//   else
-//   {
-//     ir = 9 + 3*setupTubeNumber;
-//     ig = 10 + 3*setupTubeNumber;
-//     ib = 11 + 3*setupTubeNumber;
-//   } 
+case 7: // "grésillement lumineux" général
 
-//   int minimumSegmentLength = (dmxChannels[2]*MAXLEDLENGTH)/255;
-//   int maximumSegmentLength = (dmxChannels[3]*MAXLEDLENGTH)/255;
-
-//   unsigned long dureeFlickerPattern = 100*dmxChannels[7];
-  
-      
-    
-//     // Calculer l'intervalle de mise à jour en millisecondes
-//       unsigned long interval = 0;
-
-//     // Mettre à jour les pixels si l'intervalle est écoulé
-    
-  
-
-//   int randomSegmentLength; 
-//   bool allume = random(1);
-//   int k;
-  
- 
-//  // Changement du pattern de segments allumés et éteints
-//  if ((millis()-lastUpdateFlickerPattern)<dureeFlickerPattern)
-//  {
-//    lastUpdateFlickerPattern = millis();
-//     for (int j = 0; j < MAXLEDLENGTH ; )
-//     {
-//       randomSegmentLength = random(minimumSegmentLength, maximumSegmentLength);
-      
-//       for(k = 0;(k<randomSegmentLength) &&(k<MAXLEDLENGTH);k++)
-//       {
-//         if(allume)
-//         {
-//           flickerLeds[j+k].r = dmxChannels[ir];
-//           flickerLeds[j+k].g = dmxChannels[ig];
-//           flickerLeds[j+k].b = dmxChannels[ib];        
-//         }
-//         else
-//         {
-//           flickerLeds[j+k].r = 0;
-//           flickerLeds[j+k].g = 0;
-//           flickerLeds[j+k].b = 0;
-//         }
-//       }
-//       allume = !allume;
-//       j+=k;      
-//     }
-//  }
-
- 
-// // flickers
-// unsigned long dureeAllume = 10*dmxChannels[4];
-// unsigned long dureeFlicker=0;
-
-
-
-// allume = true;
-// debutAllume=millis();
-// while(millis()<=(debutAllume+dureeAllume)) // section de flickering entière
-// {
-//   lastFlicker = millis();
-  
-//   dureeFlicker = random(5*dmxChannels[6],10*dmxChannels[6]);
-//   if(allume)
-//     {
-//       for (int j = 0; j < MAXLEDLENGTH; j++)
-//       {
-//         leds[j].r = flickerLeds[j].r;
-//         leds[j].g = flickerLeds[j].g;
-//         leds[j].b = flickerLeds[j].b;
-//       }
-//     }
-//     else
-//     {
-//         FastLED.clear();
-//     }
-//       FastLED.show();
-  
-
-//   while(millis()<(lastFlicker+dureeFlicker)) // on attend la fin du flicker
-//   {
-//        delay(1);  
-//   }
-//   allume = false;
-
-// }
-
-
-// //if((millis()-lastFlicker)
-
- 
-
-
-
-// // éteint
-// int dureeEteint = 10*dmxChannels[5];
-// delay(random((dureeEteint/2),dureeEteint));
-
-
-
-  
-// }
-// break;
-case 7: // "grésillement lumineux"
-// 2 couleur unie ou par groupe 
-// 3 longueur minimale 
-// 4 longueur maximale 
-// 5 durée d'une séquence de flickering 
-// 6 durée d'une séquence éteinte 
-// 7 durée d'un flicker individuel 
-// 8 vitesse changement de pattern (pas encore utilisé ici) 
-// 9 10 11 rgb grp0 | 12 13 14 rgb grp1 | etc.
-{
-  // 1) Choix des canaux RGB selon "couleur unie (0)" ou "par groupe (1)"
-  if (dmxChannels[1] == 0) {
+if(dmxChannels[1] !=0)
+   {
     // Couleur : on prend le triplet (9,10,11) => groupe 0
-    ir = 8;
-    ig = 9;
-    ib = 10;
+    tempr = dmxChannels[8];
+    tempg = dmxChannels[9];
+    tempb = dmxChannels[10];
   } else {
     // Couleur dépendant du groupe => 9+3*g, 10+3*g, 11+3*g
-    ir = 8  + 3 * setupTubeNumber;
-    ig = 9  + 3 * setupTubeNumber;
-    ib = 10 + 3 * setupTubeNumber;
+    tempr = dmxChannels[8  + 3 * setupTubeNumber];
+    tempg = dmxChannels[9  + 3 * setupTubeNumber];
+    tempb = dmxChannels[10  + 3 * setupTubeNumber];
   }
+flickering(dmxChannels[1],dmxChannels[2],dmxChannels[3],dmxChannels[4],dmxChannels[5],dmxChannels[6],dmxChannels[7],tempr,tempg,tempb);
+break;
 
-  // 2) Calcul des longueurs mini/maxi pour la construction de segments
-  int minimumSegmentLength = max(1, (dmxChannels[2] * MAXLEDLENGTH) / 255);
-  int maximumSegmentLength = max(1, (dmxChannels[3] * MAXLEDLENGTH) / 255);
-  // Si jamais le max < min, on les inverse
-  if (maximumSegmentLength < minimumSegmentLength) {
-    int temp = maximumSegmentLength;
-    maximumSegmentLength = minimumSegmentLength;
-    minimumSegmentLength = temp;
-  }
+case 8: // "grésillement lumineux" preset 1
+flickering(0,0,183,110,93,25,61,255,68,0);
+break;
 
-  // 3) Durée entre deux régénérations de pattern
-  unsigned long dureeFlickerPattern = 100UL * dmxChannels[7];
+case 9: // "grésillement lumineux" preset 2
+flickering(0,0,147,29,100,63,6,0,0,255);
+break;
 
-  // => Régénération du pattern si on a dépassé cette durée
-  if (millis() - lastUpdateFlickerPattern >= dureeFlickerPattern) {
-    lastUpdateFlickerPattern = millis();
+case 10: // "grésillement lumineux" preset 3
+flickering(0,0,147,29,100,63,6,255,255,255);
+break;
 
-    // On construit un nouveau "pattern" de segments allumés/éteints dans flickerLeds[]
-    bool allumeSegment = (random(2) == 1);  // random(2) => 0 ou 1
-    for (int j = 0; j < MAXLEDLENGTH; ) {
-      int segLen = random(minimumSegmentLength, maximumSegmentLength);
-      // On s’assure de ne pas dépasser la fin du strip
-      if (j + segLen > MAXLEDLENGTH) {
-        segLen = MAXLEDLENGTH - j; 
-      }
-
-      // On remplit segLen pixels
-      for (int k = 0; k < segLen; k++) {
-        if (allumeSegment) {
-          flickerLeds[j + k].r = dmxChannels[ir];
-          flickerLeds[j + k].g = dmxChannels[ig];
-          flickerLeds[j + k].b = dmxChannels[ib];
-        } else {
-          flickerLeds[j + k] = CRGB::Black;
-        }
-      }
-
-      // On alterne la phase (allumé/éteint)
-      allumeSegment = !allumeSegment;
-
-      // Avance de segLen
-      j += segLen;
-    }
-  }
-
-  // 4) Paramètres de la partie “flickering bloquant”
-  unsigned long dureeAllume = 10UL * dmxChannels[4];   // temps pendant lequel on va faire des flickers on/off
-  unsigned long dureeEteint = 10UL * dmxChannels[5];   // temps “éteint”
-  unsigned long flickerMin  =  1UL * dmxChannels[6];   // min du flicker
-  unsigned long flickerMax  =  4UL * dmxChannels[6];   // max du flicker
-
-  // On “bloque” le programme pour ce temps-là
-  debutAllume = millis();
-  while (millis() - debutAllume <= dureeAllume) {
-    // A chaque tour, on choisit une durée de flicker
-    lastFlicker = millis();
-    unsigned long dureeFlicker = random(flickerMin, flickerMax + 1);
-
-    // On alterne allumé / éteint 
-    static bool isOn = false;
-    isOn = !isOn;
-
-    if (isOn) {
-      // On copie le pattern calculé dans flickerLeds[]
-      for (int i = 0; i < MAXLEDLENGTH; i++) {
-        leds[i] = flickerLeds[i];
-      }
-    } else {
-      FastLED.clear();
-    }
-    FastLED.show();
-
-    // On attend la fin du petit flicker
-    while (millis() - lastFlicker < dureeFlicker) {
-      delay(1);  
-    }
-  }
-
-  // 5) Ensuite, on reste éteint un temps aléatoire dans [dureeEteint/2..dureeEteint]
-  if (dureeEteint > 0) {
-    delay(random(dureeEteint / 2, dureeEteint));
-  }
-  
-}
+case 11: // "grésillement lumineux" preset 3
+flickering(0,0,255,255,29,31,6,255,255,255);
 break;
 
 
