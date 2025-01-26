@@ -50,7 +50,7 @@ void OnDataRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len)
 
 void setup()
 {
-  // Serial.begin(57600);
+   Serial.begin(57600);
   // Serial.println("Version DMX OUTPUT 25012025");
   
   dmx.init(512);
@@ -72,7 +72,8 @@ void setup()
 
 void loop()
 {
-
+   Serial.print("dmxChannels[3]=");
+   Serial.println(dmxChannels[3]);
   for (int i = 0; i < 511; i++) // je ne remplis pas le canal 512, ça fait  planter le truc et je n'ai pas envie de chercher pourquoi
   {
     dmx.write(i + 1, dmxChannels[i]);
