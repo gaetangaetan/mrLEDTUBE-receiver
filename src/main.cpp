@@ -44,14 +44,14 @@ void OnDataRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len)
   {
     dmxChannels[(packetNumber * 128) + i] = incomingDMXPacket.dmxvalues[i];
   }
-    Serial.println(dmx.read(3));
-  delay(100);
+  //   Serial.println(dmx.read(3));
+  // delay(100);
 }
 
 void setup()
 {
-  Serial.begin(57600);
-  Serial.println("Version DMX OUTPUT 25012025");
+  // Serial.begin(57600);
+  // Serial.println("Version DMX OUTPUT 25012025");
   
   dmx.init(512);
 
