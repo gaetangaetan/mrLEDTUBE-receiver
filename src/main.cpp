@@ -1,7 +1,7 @@
 /***********************************************************************
  * Ce code reçoit des données Art-Net (UDP) 
  * et les transmets en DMX via une sortie XLR (MAX485)
- * Ajout d'un serveur Web affichant l'IP, accessible via http://dmx.local
+ * Ajout d'un serveur Web affichant l'IP et permettant de reconfigurer le WiFi
  ************************************************************************/
 
 #include <Arduino.h>
@@ -23,11 +23,10 @@ DMXESPSerial dmx;
  ***********************************************************************/
 
 // Broches
-// #define DATA_PIN            D2    // pin de contrôle éventuelle pour LED
 #define BUTTONPIN           D1      // bouton (pullup interne)
 #define BUTTONGROUNDPIN     D5      // sert à fournir GND au bouton
 
-#define VERSION             161
+#define VERSION             162
 
 
 /***********************************************************************
@@ -54,12 +53,7 @@ ESP8266WebServer server(80);
 // Callback Art-Net : chaque fois qu'on reçoit un paquet DMX
 void onDmxFrame(uint16_t universe, uint16_t length, uint8_t sequence, uint8_t* data)
 {
-  // 'data' contient 'length' octets de données DMX pour l'univers 'universe'.
-  // Ici on suppose qu'on ne gère qu'un seul univers (universe = 0 ou 1).
-  
   int offset = 0; 
-  // Si vous gérez plusieurs univers, vous pouvez adapter l’offset 
-  // (par ex. universe 0 => offset 0, universe 1 => offset 512, etc.)
 
   for (int i = 0; i < length; i++) {
     if (i + offset < 512) {
@@ -72,29 +66,41 @@ void onDmxFrame(uint16_t universe, uint16_t length, uint8_t sequence, uint8_t* d
  * Page principale du serveur web
  */
 void handleRoot() {
-  // Construction d'une page HTML simple
   String page = F("<!DOCTYPE html><html><head><meta charset='utf-8'/>");
   page += F("<title>Interface DMX</title></head><body>");
   page += F("<h1>Interface ArtNet -> DMX</h1>");
   
-  // Affichage de l'IP
   page += F("<p>Adresse IP de l'ESP8266 : ");
   page += WiFi.localIP().toString();
   page += F("</p>");
 
-  // Exemple : on pourra ajouter plus d'infos plus tard
   page += F("<p>Version firmware : ");
   page += String(VERSION);
   page += F("</p>");
 
+  // Bouton pour réinitialiser le WiFi
+  page += F("<form action='/resetwifi' method='POST'>");
+  page += F("<input type='submit' value='Reconfigurer le WiFi' ");
+  page += F("style='padding:10px; font-size:16px; background:#f04; color:white; border:none; cursor:pointer;'/>");
+  page += F("</form>");
+
   page += F("</body></html>");
 
-  // Envoi de la réponse au client
   server.send(200, "text/html", page);
 }
 
 /**
- * Page de gestion des URLs non définies (404)
+ * Page pour réinitialiser WiFiManager et relancer la configuration
+ */
+void handleResetWiFi() {
+  server.send(200, "text/plain", "Reinitialisation WiFi... Redémarrage de l'ESP...");
+  delay(1000);
+  wifiManager.resetSettings();  // Efface les paramètres WiFi
+  ESP.restart();                // Redémarre l’ESP pour relancer WiFiManager
+}
+
+/**
+ * Page 404
  */
 void handleNotFound() {
   server.send(404, "text/plain", "404: Not found");
@@ -106,7 +112,7 @@ void handleNotFound() {
  ***********************************************************************/ 
 void setup()
 {
-  dmx.init(512);   // Initialisation de la bibliothèque DMX
+  dmx.init(512);
   Serial.begin(115200);
   Serial.println("\n=== Interface ArtNet DMX ===");
   Serial.print("Version ");
@@ -116,7 +122,6 @@ void setup()
   wifiManager.setWiFiAutoReconnect(true);
   wifiManager.setDebugOutput(true);
 
-  // autoConnect : tente de se connecter au réseau connu ou lance un portail
   if(!wifiManager.autoConnect("Artnet-Receiver")) {
     Serial.println("Echec d’autoConnect, on lance un portail");
     wifiManager.startConfigPortal("Artnet-Receiver"); 
@@ -133,17 +138,16 @@ void setup()
   }
 
   // --- Configuration du serveur web ---
-  server.on("/", handleRoot);          // page principale
-  server.onNotFound(handleNotFound);   // page 404
+  server.on("/", handleRoot);          // Page principale
+  server.on("/resetwifi", HTTP_POST, handleResetWiFi); // Page pour reset WiFi
+  server.onNotFound(handleNotFound);   // Page 404
   server.begin();
-  MDNS.addService("http", "tcp", 80);  // annonce du service HTTP sur le port 80
+  MDNS.addService("http", "tcp", 80);  // Annonce du service HTTP sur le port 80
   Serial.println("Serveur HTTP démarré.");
 
   // ================ Démarrage de l’Art-Net ================
   artnet.begin();
   artnet.setArtDmxCallback(onDmxFrame);
-
-  // Fin du setup
 }
 
 
@@ -162,7 +166,6 @@ void loop()
   artnet.read();
 
   // Mise à jour des canaux DMX
-  // Remarque : on écrit ici 511 canaux (le 512e n'est pas forcément nécessaire).
   for (int i = 0; i < 511; i++) {
     dmx.write(i + 1, dmxChannels[i]);
   }
