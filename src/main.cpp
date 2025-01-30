@@ -88,11 +88,16 @@ void loadPresetFromEEPROM(int presetIndex, uint8_t* data) {
 void onDmxFrame(uint16_t universe, uint16_t length, uint8_t sequence, uint8_t* packetData)
 {
   if (currentMode == MODE_LIVE) {
-    for (int i = 0; i < length; i++) {
-      if (i < MAX_CHANNELS) {
-        artnetChannels[i] = packetData[i];
-      }
+  //  Serial.println("ArtNet packet received:");
+    for (int i = 0; i < length && i < 10; i++) { // Affiche les 10 premières valeurs
+      artnetChannels[i] = packetData[i];
+      // Serial.print("Channel ");
+      // Serial.print(i + 1);
+      // Serial.print(": ");
+      // Serial.print(artnetChannels[i]);
+      // Serial.print(" | ");
     }
+    // Serial.println();
   }
 }
 
@@ -112,6 +117,16 @@ void handleDMXData() {
     }
   }
   json += "]";
+  
+  // Débogage : Affiche les 10 premières valeurs DMX envoyées
+  Serial.print("Sending /dmxdata JSON: ");
+  Serial.print("[");
+  for (int i = 0; i < 10; i++) {
+    Serial.print(dmxChannels[i]);
+    if (i < 9) Serial.print(", ");
+  }
+  Serial.println("...]");
+  
   server.send(200, "application/json", json);
 }
 
@@ -120,6 +135,10 @@ void handleDMXData() {
  */
 void handleToggleMode() {
   currentMode = (currentMode + 1) % 3;
+  Serial.print("Mode toggled to: ");
+  if (currentMode == MODE_LIVE) Serial.println("LIVE");
+  else if (currentMode == MODE_PRESET) Serial.println("PRESET");
+  else if (currentMode == MODE_MANUAL) Serial.println("MANUAL");
   server.send(200, "text/plain", "Mode toggled");
 }
 
@@ -137,6 +156,8 @@ void handleSavePreset() {
     return;
   }
   savePresetToEEPROM(presetIndex, dmxChannels);
+  Serial.print("Preset saved in slot ");
+  Serial.println(presetIndex + 1);
   server.send(200, "text/plain", "Preset saved in slot " + String(presetIndex+1));
 }
 
@@ -154,6 +175,8 @@ void handleRecallPreset() {
     return;
   }
   loadPresetFromEEPROM(presetIndex, dmxChannels);
+  Serial.print("Preset recalled: ");
+  Serial.println(presetIndex + 1);
   server.send(200, "text/plain", "Preset recalled: " + String(presetIndex+1));
 }
 
@@ -161,6 +184,7 @@ void handleRecallPreset() {
  * /resetwifi : efface les paramètres WiFi et redémarre
  */
 void handleResetWiFi() {
+  Serial.println("WiFi settings reset. Restarting ESP...");
   server.send(200, "text/plain", "Réinitialisation WiFi... Redémarrage de l'ESP...");
   delay(1000);
   wifiManager.resetSettings();
@@ -185,6 +209,10 @@ void handleSetDMX() {
   }
   if (currentMode == MODE_MANUAL) {
     dmxChannels[channel - 1] = value;
+    Serial.print("DMX channel ");
+    Serial.print(channel);
+    Serial.print(" set to ");
+    Serial.println(value);
   }
   server.send(200, "text/plain", "OK");
 }
@@ -304,6 +332,7 @@ void handleRoot() {
   page += F("  fetch('/dmxdata')");
   page += F("    .then(response => response.json())");
   page += F("    .then(data => {");
+  page += F("      console.log('Received DMX data:', data.slice(0, 10));"); // Débogage
   page += F("      for (let i = 0; i < 512; i++) {");
   page += F("        let cell = document.getElementById('ch' + i);");
   page += F("        if (cell) {");
@@ -349,6 +378,7 @@ void handleRoot() {
   page += F("    currentCell.style.color = (newValue == 0) ? '" ZERO_COLOR "' : 'black';");
   page += F("    fetch('/setdmx?ch=' + channel + '&val=' + newValue);");
   page += F("    lastValue = newValue;");
+  page += F("    console.log('Set DMX channel', channel, 'to', newValue);"); // Débogage
   page += F("  }");
   page += F("}");
 
@@ -371,19 +401,26 @@ void handleRoot() {
 void setup()
 {
   Serial.begin(115200);
+  Serial.println("Starting ESP8266 ArtNet -> DMX Interface...");
 
   // Init EEPROM
   initEEPROM();
+  Serial.println("EEPROM initialized.");
 
   // DMX
   dmx.init(512);
+  Serial.println("DMX initialized.");
 
   // WiFi
   if (!wifiManager.autoConnect("Artnet-Receiver")) {
     wifiManager.startConfigPortal("Artnet-Receiver"); 
   }
+  Serial.println("WiFi connected.");
+  
   if (MDNS.begin("dmx")) {
     Serial.println("MDNS actif => http://dmx.local");
+  } else {
+    Serial.println("Erreur d'initialisation MDNS.");
   }
 
   // Routes
@@ -396,14 +433,17 @@ void setup()
   server.on("/setdmx", handleSetDMX);
 
   server.begin();
+  Serial.println("Serveur web démarré.");
 
   // ArtNet
   artnet.begin();
   artnet.setArtDmxCallback(onDmxFrame);
+  Serial.println("ArtNet démarré et callback configuré.");
 
   // Valeurs initiales à 0
   memset(dmxChannels,    0, sizeof(dmxChannels));
   memset(artnetChannels, 0, sizeof(artnetChannels));
+  Serial.println("Canaux DMX initialisés à 0.");
 }
 
 void loop()
@@ -414,14 +454,24 @@ void loop()
 
   // Mise à jour dmxChannels selon le mode
   if (currentMode == MODE_LIVE) {
-    // On recopie Artnet -> dmx
+    // On recopie ArtNet -> DMX
     memcpy(dmxChannels, artnetChannels, MAX_CHANNELS);
+    // Débogage : Affiche les 5 premiers canaux DMX après copie
+    // Serial.println("DMX Channels Updated (first 5 channels):");
+    for (int i = 0; i < 5; i++) {
+      // Serial.print("Channel ");
+      // Serial.print(i + 1);
+      // Serial.print(": ");
+      // Serial.print(dmxChannels[i]);
+      // Serial.print(" | ");
+    }
+    // Serial.println();
   }
   // En PRESET => dmxChannels est figé, modifié seulement par recall
   // En MANUAL => on modifie ch1..16 via /setdmx, le reste reste stable
 
   // Sortie DMX
-  for (int i = 0; i < 511; i++) {
+  for (int i = 0; i < 511; i++) { // On n'écrit pas la valeur 512 pour éviter un bug
     dmx.write(i + 1, dmxChannels[i]);
   }
   dmx.update();
