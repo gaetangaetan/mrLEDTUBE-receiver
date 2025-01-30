@@ -23,7 +23,7 @@ DMXESPSerial dmx;
 #define VERSION 200
 
 // --- Paramètres d'interface et de couleurs ---
-#define ZERO_COLOR       "#f9f9f9"      // Couleur du texte pour valeurs DMX = 0
+#define ZERO_COLOR       "#888888"      // Couleur du texte pour valeurs DMX = 0
 #define HIGHLIGHT_COLOR "#ffaae3"       // Couleur de surlignage pour valeurs modifiées
 
 // --- Dimensions du tableau DMX ---
