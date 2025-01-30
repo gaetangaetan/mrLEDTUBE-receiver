@@ -421,7 +421,7 @@ void loop()
   // En MANUAL => on modifie ch1..16 via /setdmx, le reste reste stable
 
   // Sortie DMX
-  for (int i = 0; i < 511; i++) { // on ne copoie pas le canal 512 sinon il y a un bug (je ne sais pas pourquoi)
+  for (int i = 0; i < 511; i++) {
     dmx.write(i + 1, dmxChannels[i]);
   }
   dmx.update();
