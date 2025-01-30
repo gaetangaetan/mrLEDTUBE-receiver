@@ -39,7 +39,7 @@ int displayCount = 128;    // Nombre de canaux à afficher, réduit à 128 pour 
 #define EEPROM_SIZE 4096                // 8 presets × 512 octets = 4096
 // Optionnel : vous pourriez réserver un peu plus pour stocker une signature, etc.
 
-#define VERSION 212 // Incrémenté à chaque nouvelle version
+#define VERSION 213 // Incrémenté à chaque nouvelle version
 
 /***********************************************************************
  *                         Variables globales
@@ -305,6 +305,7 @@ void handleRoot() {
   int numRows = (displayCount + NUM_COLS - 1) / NUM_COLS;
 
   String page = F("<!DOCTYPE html><html><head><meta charset='utf-8'/>");
+  page += F("<meta name='viewport' content='width=device-width, initial-scale=1.0'>"); // Ajout pour meilleure compatibilité mobile
   page += F("<title>Interface DMX</title>");
   page += F("<style>");
   page += F("body { font-family: Arial, sans-serif; text-align: center; }");
@@ -526,13 +527,15 @@ void handleRoot() {
   page += F("      let startY = 0;\n");
   page += F("      let startValue = 0;\n");
   
+  // Gestion des événements tactiles
+  page += F("      // Gestion des événements de la souris\n");
   page += F("      cell.addEventListener('mousedown', function(e) {\n");
   page += F("        isDragging = true;\n");
   page += F("        startY = e.clientY;\n");
   page += F("        startValue = parseInt(cell.innerText);\n");
   page += F("        e.preventDefault();\n");
   page += F("      });\n");
-  
+
   page += F("      document.addEventListener('mousemove', function(e) {\n");
   page += F("        if (isDragging) {\n");
   page += F("          let deltaY = startY - e.clientY;\n");
@@ -549,12 +552,48 @@ void handleRoot() {
   page += F("            });\n");
   page += F("        }\n");
   page += F("      });\n");
-  
+
   page += F("      document.addEventListener('mouseup', function(e) {\n");
   page += F("        if (isDragging) {\n");
   page += F("          isDragging = false;\n");
   page += F("        }\n");
   page += F("      });\n");
+
+  // Gestion des événements tactiles
+  page += F("      // Gestion des événements tactiles\n");
+  page += F("      cell.addEventListener('touchstart', function(e) {\n");
+  page += F("        if (e.touches.length === 1) { // Un seul doigt\n");
+  page += F("          isDragging = true;\n");
+  page += F("          startY = e.touches[0].clientY;\n");
+  page += F("          startValue = parseInt(cell.innerText);\n");
+  page += F("          e.preventDefault();\n");
+  page += F("        }\n");
+  page += F("      }, { passive: false });\n"); // passive: false pour pouvoir appeler preventDefault()
+
+  page += F("      document.addEventListener('touchmove', function(e) {\n");
+  page += F("        if (isDragging && e.touches.length === 1) {\n");
+  page += F("          let deltaY = startY - e.touches[0].clientY;\n");
+  page += F("          let deltaValue = Math.floor(deltaY / 5); // Ajuster la sensibilité\n");
+  page += F("          let newValue = startValue + deltaValue;\n");
+  page += F("          if (newValue < 0) newValue = 0;\n");
+  page += F("          if (newValue > 255) newValue = 255;\n");
+  page += F("          cell.innerText = newValue;\n");
+  page += F("          fetch('/setchannel?c=' + channel + '&v=' + newValue)\n");
+  page += F("            .then(response => {\n");
+  page += F("              if (!response.ok) {\n");
+  page += F("                alert('Erreur lors de la mise à jour du canal');\n");
+  page += F("              }\n");
+  page += F("            });\n");
+  page += F("          e.preventDefault();\n");
+  page += F("        }\n");
+  page += F("      }, { passive: false });\n");
+
+  page += F("      document.addEventListener('touchend', function(e) {\n");
+  page += F("        if (isDragging) {\n");
+  page += F("          isDragging = false;\n");
+  page += F("        }\n");
+  page += F("      });\n");
+  
   page += F("    });\n");
   page += F("  }\n");
   page += F("});\n");
