@@ -674,7 +674,7 @@ void loop()
 
   // Envoi final sur la sortie DMX (toujours 512 canaux)
   for (int i = 0; i < MAX_CHANNELS-1; i++) {
-    dmx.write(i + 1, dmxChannels[i]);
+    dmx.write(i + 1, dmxChannels[i]); 
   }
   dmx.update();
 }
