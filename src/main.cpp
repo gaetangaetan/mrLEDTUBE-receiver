@@ -1,8 +1,8 @@
 /***********************************************************************
  * Exemple : Récepteur ArtNet -> DMX sur ESP8266 + gestion de 8 presets
  *           - Mode LIVE (flux Artnet) ou PRESET (valeurs enregistrées)
- *           - 8 presets enregistrables / rappelables
- *           - Les presets sont maintenant stockés en EEPROM (persistant)
+ *           - 8 presets enregistrables / rappelables (stockés en EEPROM)
+ *           - Le bouton "Reconfigurer le WiFi" relance le portail WiFiManager
  ************************************************************************/
 
 #include <Arduino.h>
@@ -56,7 +56,6 @@ ESP8266WebServer server(80);
 
 /**
  * Initialise l'EEPROM en lecture/écriture
- * -> à appeler dans le setup()
  */
 void initEEPROM() {
   EEPROM.begin(EEPROM_SIZE);  // Réserve 4096 octets en flash pour émuler l'EEPROM
@@ -172,8 +171,19 @@ void handleRecallPreset() {
 }
 
 /**
- * Page principale : interface HTML
+ * /resetwifi : efface les paramètres WiFi et redémarre l'ESP pour relancer le portail WiFiManager
  */
+void handleResetWiFi() {
+  server.send(200, "text/plain", "Réinitialisation WiFi... Redémarrage de l'ESP...");
+  delay(1000);
+  wifiManager.resetSettings();
+  ESP.restart();
+}
+
+/***********************************************************************
+ *                            PAGE PRINCIPALE
+ ***********************************************************************/
+
 void handleRoot() {
   String modeString = isLive ? "LIVE" : "PRESET";
 
@@ -199,9 +209,11 @@ void handleRoot() {
   page += String(VERSION);
   page += F("</p>");
 
-  // Bouton pour réinitialiser le WiFi (si tu l'as implémenté)
-  // ...
-  
+  // Bouton pour reconfigurer le WiFi (relancer portail WiFiManager)
+  page += F("<form action='/resetwifi' method='POST'>");
+  page += F("<input type='submit' class='btn' value='Reconfigurer le WiFi' style='background:#f04; color:white;'/>");
+  page += F("</form>");
+
   // Indication du mode + bouton Toggle
   page += F("<h2>Mode actuel : <span id='mode'>");
   page += modeString;
@@ -262,7 +274,7 @@ void handleRoot() {
   page += F("let interval = setInterval(updateDMX, refreshRate);");
 
   page += F("function updateDMX() {");
-  page += F("  fetch('/dmxdata')") ;
+  page += F("  fetch('/dmxdata')");
   page += F("    .then(response => response.json())");
   page += F("    .then(data => {");
   page += F("      for (let i = 0; i < 512; i++) {");
@@ -321,15 +333,17 @@ void setup()
   server.on("/toggleMode", handleToggleMode);
   server.on("/save", handleSavePreset);
   server.on("/recall", handleRecallPreset);
-  // ... /resetwifi etc si besoin
+  // Route pour reset WiFi
+  server.on("/resetwifi", HTTP_POST, handleResetWiFi);
+
   server.begin();
 
   // ArtNet
   artnet.begin();
   artnet.setArtDmxCallback(onDmxFrame);
 
-  // On peut initialiser dmxChannels ou artnetChannels à 0
-  memset(dmxChannels, 0, sizeof(dmxChannels));
+  // Zéro par défaut
+  memset(dmxChannels,    0, sizeof(dmxChannels));
   memset(artnetChannels, 0, sizeof(artnetChannels));
 }
 
