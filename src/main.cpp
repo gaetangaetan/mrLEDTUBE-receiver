@@ -3,7 +3,7 @@
  *           - Modes LIVE, PRESET et MANUAL
  *           - 8 presets enregistrables / rappelables (stockés en EEPROM)
  *           - Le bouton "Toggle Mode" passe entre les modes
- *           - Mode MANUAL avec tableau DMX interactif (clic & drag vertical) limité à tous les canaux affichés
+ *           - Mode MANUAL avec tableau DMX interactif (clic & drag vertical) limité aux 256 premiers canaux
  *           - Limiter l'affichage à 128, 256, 384 ou 512 canaux
  ************************************************************************/
 
@@ -39,7 +39,7 @@ int displayCount = 128;    // Nombre de canaux à afficher, réduit à 128 pour 
 #define EEPROM_SIZE 4096                // 8 presets × 512 octets = 4096
 // Optionnel : vous pourriez réserver un peu plus pour stocker une signature, etc.
 
-#define VERSION 211 // Incrémenté à chaque nouvelle version
+#define VERSION 212 // Incrémenté à chaque nouvelle version
 
 /***********************************************************************
  *                         Variables globales
@@ -394,8 +394,8 @@ void handleRoot() {
     for (int col = 0; col < NUM_COLS; col++) {
       int index = row * NUM_COLS + col;
       if (index < displayCount) {
-        // Ajouter une classe 'editable' si en mode MANUAL
-        if (currentMode == MANUAL) {
+        // Limiter les canaux éditables en MANUAL à 256 premiers canaux
+        if (currentMode == MANUAL && index < 256) {
           page += "<td id='ch" + String(index) + "' class='editable' data-channel='" + String(index) + "' style='color:" ZERO_COLOR ";'>" + String(dmxChannels[index]) + "</td>";
         }
         else {
