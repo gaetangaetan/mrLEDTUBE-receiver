@@ -3,6 +3,7 @@
  *           - Mode LIVE (flux Artnet) ou PRESET (valeurs enregistrées)
  *           - 8 presets enregistrables / rappelables (stockés en EEPROM)
  *           - Le bouton "Reconfigurer le WiFi" relance le portail WiFiManager
+ *           - Nouvelle fonctionnalité : Limiter l'affichage à un nombre de canaux (128, 256, 384, 512)
  ************************************************************************/
 
 #include <Arduino.h>
@@ -20,15 +21,14 @@
 #include <ESPDMX.h>
 DMXESPSerial dmx;
 
-#define VERSION 200
-
 // --- Paramètres d'interface et de couleurs ---
 #define ZERO_COLOR       "#888888"      // Couleur du texte pour valeurs DMX = 0
 #define HIGHLIGHT_COLOR "#ffaae3"       // Couleur de surlignage pour valeurs modifiées
 
 // --- Dimensions du tableau DMX ---
-#define NUM_COLS     20  // 20 colonnes
-#define NUM_ROWS     26  // 26 lignes (on utilise 512 canaux sur 520 emplacements)
+const int NUM_COLS = 20;  // 20 colonnes
+int displayCount = 512;   // Nombre de canaux à afficher, par défaut 512
+
 #define MAX_CHANNELS 512 // 512 canaux DMX
 
 // --- Nombre de presets ---
@@ -37,6 +37,8 @@ DMXESPSerial dmx;
 // --- EEPROM ---
 #define EEPROM_SIZE 4096                // 8 presets × 512 octets = 4096
 // Optionnel : vous pourriez réserver un peu plus pour stocker une signature, etc.
+
+#define VERSION 205
 
 /***********************************************************************
  *                         Variables globales
@@ -67,7 +69,7 @@ void initEEPROM() {
  * param : data (tableau de 512 octets) à écrire
  */
 void savePresetToEEPROM(int presetIndex, const uint8_t* data) {
-  int offset = presetIndex * 512;
+  int offset = presetIndex * MAX_CHANNELS;
   for (int i = 0; i < MAX_CHANNELS; i++) {
     EEPROM.write(offset + i, data[i]);  
   }
@@ -80,7 +82,7 @@ void savePresetToEEPROM(int presetIndex, const uint8_t* data) {
  * param : data (tableau de 512 octets) où stocker les valeurs lues
  */
 void loadPresetFromEEPROM(int presetIndex, uint8_t* data) {
-  int offset = presetIndex * 512;
+  int offset = presetIndex * MAX_CHANNELS;
   for (int i = 0; i < MAX_CHANNELS; i++) {
     data[i] = EEPROM.read(offset + i);
   }
@@ -108,13 +110,13 @@ void onDmxFrame(uint16_t universe, uint16_t length, uint8_t sequence, uint8_t* p
  ***********************************************************************/
 
 /**
- * /dmxdata : retourne les valeurs dmxChannels en JSON (512 entiers)
+ * /dmxdata : retourne les valeurs dmxChannels en JSON (displayCount entiers)
  */
 void handleDMXData() {
   String json = "[";
-  for (int i = 0; i < MAX_CHANNELS; i++) {
+  for (int i = 0; i < displayCount; i++) {
     json += String(dmxChannels[i]);
-    if (i < (MAX_CHANNELS - 1)) {
+    if (i < (displayCount - 1)) {
       json += ",";
     }
   }
@@ -180,12 +182,35 @@ void handleResetWiFi() {
   ESP.restart();
 }
 
+/**
+ * /setDisplay : définit le nombre de canaux à afficher
+ * param 'count' = 128, 256, 384, 512
+ * Exemple : /setDisplay?count=256
+ */
+void handleSetDisplay() {
+  if (!server.hasArg("count")) {
+    server.send(400, "text/plain", "Missing count parameter");
+    return;
+  }
+  int count = server.arg("count").toInt();
+  if (count != 128 && count != 256 && count != 384 && count != 512) {
+    server.send(400, "text/plain", "Invalid count value");
+    return;
+  }
+  displayCount = count;
+  server.sendHeader("Location", "/");
+  server.send(302, "text/plain", "");
+}
+
 /***********************************************************************
  *                            PAGE PRINCIPALE
  ***********************************************************************/
 
 void handleRoot() {
   String modeString = isLive ? "LIVE" : "PRESET";
+
+  // Calculer le nombre de lignes en fonction de displayCount et NUM_COLS
+  int numRows = (displayCount + NUM_COLS - 1) / NUM_COLS;
 
   String page = F("<!DOCTYPE html><html><head><meta charset='utf-8'/>");
   page += F("<title>Interface DMX</title>");
@@ -198,10 +223,10 @@ void handleRoot() {
   page += F(".btn { padding:6px 10px; margin:2px; cursor:pointer;}"); // style commun
   page += F("</style>");
   page += F("</head><body>");
-  
+
   page += F("<h1>Interface ArtNet -> DMX + PRESSETS</h1>");
-  
-  // Info WiFi + Firmware
+
+  // Informations WiFi et Firmware
   page += F("<p>Adresse IP de l'ESP8266 : ");
   page += WiFi.localIP().toString();
   page += F("</p>");
@@ -214,25 +239,36 @@ void handleRoot() {
   page += F("<input type='submit' class='btn' value='Reconfigurer le WiFi' style='background:#f04; color:white;'/>");
   page += F("</form>");
 
-  // Indication du mode + bouton Toggle
+  // Indication du mode actuel + bouton de basculement
   page += F("<h2>Mode actuel : <span id='mode'>");
   page += modeString;
   page += F("</span></h2>");
   page += F("<button class='btn' onclick=\"fetch('/toggleMode').then(r=>location.reload());\">Toggle Mode</button>");
 
-  // Boutons SAVE
+  // Menu déroulant pour choisir le nombre de canaux à afficher
+  page += F("<h3>Nombre de canaux à afficher</h3>");
+  page += F("<form action='/setDisplay' method='GET'>");
+  page += F("<select name='count' onchange='this.form.submit()'>");
+  page += F("<option value='128' ") + String(displayCount == 128 ? "selected" : "") + F(">128</option>");
+  page += F("<option value='256' ") + String(displayCount == 256 ? "selected" : "") + F(">256</option>");
+  page += F("<option value='384' ") + String(displayCount == 384 ? "selected" : "") + F(">384</option>");
+  page += F("<option value='512' ") + String(displayCount == 512 ? "selected" : "") + F(">512</option>");
+  page += F("</select>");
+  page += F("</form>");
+
+  // Boutons pour sauvegarder les presets
   page += F("<h3>Save Preset</h3>");
   for (int i = 1; i <= PRESET_COUNT; i++) {
     page += "<button class='btn' onclick=\"fetch('/save?p=" + String(i) + "')\">" + String(i) + "</button>";
   }
 
-  // Boutons RECALL
+  // Boutons pour rappeler les presets
   page += F("<h3>Recall Preset</h3>");
   for (int i = 1; i <= PRESET_COUNT; i++) {
     page += "<button class='btn' onclick=\"fetch('/recall?p=" + String(i) + "').then(r=>location.reload());\">" + String(i) + "</button>";
   }
 
-  // Slider de rafraîchissement
+  // Slider pour ajuster la vitesse de mise à jour
   page += F("<h2>Vitesse de mise à jour</h2>");
   page += F("<input type='range' id='refreshRate' min='100' max='2000' step='100' value='1000' oninput='updateRate()'>");
   page += F("<p>Rafraîchissement : <span id='rateValue'>1000</span> ms</p>");
@@ -246,30 +282,30 @@ void handleRoot() {
   }
   page += F("</tr>");
 
-  for (int row = 0; row < NUM_ROWS; row++) {
+  for (int row = 0; row < numRows; row++) {
     page += "<tr>";
     int firstChannel = (row * NUM_COLS) + 1;
-    if (firstChannel <= MAX_CHANNELS) {
+    if (firstChannel <= displayCount) {
       page += "<td class='channel-index'>" + String(firstChannel) + "</td>";
     } else {
       page += "<td></td>";
     }
     for (int col = 0; col < NUM_COLS; col++) {
       int index = row * NUM_COLS + col;
-      if (index < MAX_CHANNELS) {
+      if (index < displayCount) {
         page += "<td id='ch" + String(index) + "' style='color:" ZERO_COLOR ";'>0</td>";
       } else {
-        page += "<td></td>"; // en dehors des 512
+        page += "<td></td>"; // en dehors des displayCount
       }
     }
     page += "</tr>";
   }
   page += F("</table>");
 
-  // Script AJAX pour mise à jour
+  // Script JavaScript pour les mises à jour AJAX
   page += F("<script>");
-  page += F("let dmxValues = new Array(512).fill(0);");
-  page += F("let changeTimers = new Array(512).fill(null);");
+  page += F("let dmxValues = new Array(") + String(displayCount) + F(").fill(0);");
+  page += F("let changeTimers = new Array(") + String(displayCount) + F(").fill(null);");
   page += F("let refreshRate = 1000;");
   page += F("let interval = setInterval(updateDMX, refreshRate);");
 
@@ -277,7 +313,7 @@ void handleRoot() {
   page += F("  fetch('/dmxdata')");
   page += F("    .then(response => response.json())");
   page += F("    .then(data => {");
-  page += F("      for (let i = 0; i < 512; i++) {");
+  page += F("      for (let i = 0; i < ") + String(displayCount) + F("; i++) {");
   page += F("        let cell = document.getElementById('ch' + i);");
   page += F("        if (cell) {");
   page += F("          if (data[i] !== dmxValues[i]) {");
@@ -333,6 +369,7 @@ void setup()
   server.on("/toggleMode", handleToggleMode);
   server.on("/save", handleSavePreset);
   server.on("/recall", handleRecallPreset);
+  server.on("/setDisplay", handleSetDisplay); // Nouvelle route pour la sélection du nombre de canaux
   // Route pour reset WiFi
   server.on("/resetwifi", HTTP_POST, handleResetWiFi);
 
@@ -342,7 +379,7 @@ void setup()
   artnet.begin();
   artnet.setArtDmxCallback(onDmxFrame);
 
-  // Zéro par défaut
+  // Initialiser les valeurs DMX à zéro
   memset(dmxChannels,    0, sizeof(dmxChannels));
   memset(artnetChannels, 0, sizeof(artnetChannels));
 }
@@ -358,8 +395,8 @@ void loop()
     memcpy(dmxChannels, artnetChannels, MAX_CHANNELS);
   }
 
-  // Envoi final sur la sortie DMX
-  for (int i = 0; i < 511; i++) {
+  // Envoi final sur la sortie DMX (toujours 512 canaux)
+  for (int i = 0; i < MAX_CHANNELS; i++) {
     dmx.write(i + 1, dmxChannels[i]);
   }
   dmx.update();
