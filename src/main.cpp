@@ -38,7 +38,7 @@ int displayCount = 128;    // Nombre de canaux à afficher par défaut
 // --- EEPROM ---
 #define EEPROM_SIZE 4096                // 8 presets × 512 octets = 4096
 
-#define VERSION 216 // Incrémenté à chaque nouvelle version
+#define VERSION 217 // Incrémenté à chaque nouvelle version
 
 /***********************************************************************
  *                         Variables globales
@@ -302,7 +302,7 @@ void handleSetChannel() {
     return;
   }
   dmxChannels[channel] = (uint8_t)value;
-  Serial.println("Canal " + String(channel + 1) + " défini à " + String(value) + ".");
+  //Serial.println("Canal " + String(channel + 1) + " défini à " + String(value) + ".");
   server.send(200, "text/plain", "Canal " + String(channel + 1) + " défini à " + String(value) + ".");
 }
 
@@ -365,7 +365,7 @@ void handleRoot() {
   page += "</style>";
   page += "</head><body>";
 
-  page += "<h1>Interface ArtNet -> DMX + PRESSETS</h1>";
+  page += "<h1>Interface ArtNet -> DMX + PRESETS</h1>";
 
   // Informations WiFi et Firmware
   page += "<p>Adresse IP de l'ESP8266 : " + WiFi.localIP().toString() + "</p>";
@@ -495,7 +495,7 @@ void handleRoot() {
   page += "  fetch('/recall?p=' + preset)\n";
   page += "    .then(response => {\n";
   page += "      if (response.ok) {\n";
-  page += "        alert('Preset ' + preset + ' rappelé');\n";
+  //page += "        alert('Preset ' + preset + ' rappelé');\n";
   page += "        window.location.reload();\n";
   page += "      } else {\n";
   page += "        alert('Erreur lors du rappel du preset');\n";
@@ -575,7 +575,7 @@ void handleRoot() {
   page += "      document.addEventListener('mousemove', function(e) {\n";
   page += "        if (isDragging) {\n";
   page += "          let deltaY = startY - e.clientY;\n";
-  page += "          let deltaValue = Math.floor(deltaY / 5); // Ajuster la sensibilité\n";
+  page += "          let deltaValue = Math.floor(deltaY / 1); // Ajuster la sensibilité\n"; // j'ai changé le /5 par /1 pour augmenter la sensibilité
   page += "          let newValue = startValue + deltaValue;\n";
   page += "          if (newValue < 0) newValue = 0;\n";
   page += "          if (newValue > 255) newValue = 255;\n";
@@ -609,7 +609,7 @@ void handleRoot() {
   page += "      document.addEventListener('touchmove', function(e) {\n";
   page += "        if (isDragging && e.touches.length === 1) {\n";
   page += "          let deltaY = startY - e.touches[0].clientY;\n";
-  page += "          let deltaValue = Math.floor(deltaY / 5); // Ajuster la sensibilité\n";
+  page += "          let deltaValue = Math.floor(deltaY / 1); // Ajuster la sensibilité\n";
   page += "          let newValue = startValue + deltaValue;\n";
   page += "          if (newValue < 0) newValue = 0;\n";
   page += "          if (newValue > 255) newValue = 255;\n";
