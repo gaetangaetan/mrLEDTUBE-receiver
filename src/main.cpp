@@ -1,4 +1,5 @@
 /*
+début d'une version qui réagira au gun
 
 Ce code fait partie d'un système de contrôle DMX sans fil pour ledstrip.
 
