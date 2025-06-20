@@ -90,8 +90,8 @@ Le numéro de groupe est enregistré en EEPROM
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h> 
 WiFiManager wifiManager;
-#define APNAME "mrLEDTUBE15"
-#define VERSION 15 // numéro de version pour m'y retrouver pendant le développement
+#define APNAME "mrLEDTUBE22"
+#define VERSION 22 // numéro de version pour m'y retrouver pendant le développement
 
 #define EEPROM_SIZE 32
 
@@ -102,7 +102,7 @@ CRGB flickerLeds[MAXLEDLENGTH]; // objet représentant la mémoire du ledstrip p
 uint8_t ledsTemp[MAXLEDLENGTH][3]; // tableau représentant les valeurs r g b de chaque led du ledstrip
 
 #include "OneButton.h"
-OneButton button1(BUTTONPIN, true); // Setup a new OneButton on pin BUTTONPIN.
+OneButton button1(BUTTONPIN, true); // Setup a new OneButto²n on pin BUTTONPIN.
 
 #include <ESP8266WiFiMulti.h>
 #include <espnow.h> 
@@ -242,7 +242,7 @@ void flickering(uint8_t dmx1, uint8_t dmx2, uint8_t dmx3, uint8_t dmx4, uint8_t 
     bool allumeSegment = (random(2) == 1);  // random(2) => 0 ou 1
     for (int j = 0; j < MAXLEDLENGTH; ) {
       int segLen = random(minimumSegmentLength, maximumSegmentLength);
-      // On s’assure de ne pas dépasser la fin du strip
+      // On s'assure de ne pas dépasser la fin du strip
       if (j + segLen > MAXLEDLENGTH) {
         segLen = MAXLEDLENGTH - j; 
       }
@@ -266,13 +266,13 @@ void flickering(uint8_t dmx1, uint8_t dmx2, uint8_t dmx3, uint8_t dmx4, uint8_t 
     }
   }
 
-  // 4) Paramètres de la partie “flickering bloquant”
+  // 4) Paramètres de la partie "flickering bloquant"
   unsigned long dureeAllume = random(5UL * dmx4, 10UL * dmx4);   // temps pendant lequel on va faire des flickers on/off
-  unsigned long dureeEteint = random(5UL * dmx5, 10UL * dmx5);   // temps “éteint”
+  unsigned long dureeEteint = random(5UL * dmx5, 10UL * dmx5);   // temps "éteint"
   unsigned long flickerMin  =  dmx6/10;   // min du flicker
   unsigned long flickerMax  =  dmx6;   // max du flicker
 
-  // On “bloque” le programme pour ce temps-là
+  // On "bloque" le programme pour ce temps-là
   debutAllume = millis();
   while (millis() - debutAllume <= dureeAllume) {
     // A chaque tour, on choisit une durée de flicker
@@ -380,7 +380,7 @@ case 2: // Mode Rainbow avec intensité ajustable
 {
     uint8_t colorDensity = dmxChannels[2] / 2; // Canal 3 pour la densité des couleurs (distance entre pixels de même couleur)
     uint8_t rainbowSpeed = dmxChannels[3];    // Canal 4 pour la vitesse de déplacement
-    uint8_t intensity = dmxChannels[4];       // Canal 5 pour l’intensité générale des LEDs (0–255)
+    uint8_t intensity = dmxChannels[4];       // Canal 5 pour l'intensité générale des LEDs (0–255)
 
     // Calculer la densité des couleurs
     uint8_t deltaHue = map(colorDensity, 0, 255, 1, 50); // Plus colorDensity est élevé, plus les couleurs sont espacées
@@ -388,7 +388,7 @@ case 2: // Mode Rainbow avec intensité ajustable
     // Générer un arc-en-ciel avec la densité contrôlée
     fill_rainbow(leds, MAXLEDLENGTH, (hueOffset + (setupTubeNumber * dmxChannels[1])) % 255, deltaHue);
 
-    // Appliquer l’intensité générale
+    // Appliquer l'intensité générale
     for (int i = 0; i < MAXLEDLENGTH; i++) {
         leds[i].fadeLightBy(255 - intensity); // Réduire la luminosité en fonction de l'intensité
     }
@@ -755,6 +755,119 @@ void longPressStart1() // un clic long, permet de passer de RUNNING à SETUP et 
   etat = !etat;
 }
 
+// --- Ajout OTA ---
+bool otaInProgress = false;
+unsigned long otaBlinkTimer = 0;
+bool otaBlinkState = false;
+
+void otaBlinkColor(uint8_t r, uint8_t g, uint8_t b) {
+  unsigned long now = millis();
+  if (now - otaBlinkTimer > 250) { // 2 Hz
+    otaBlinkTimer = now;
+    otaBlinkState = !otaBlinkState;
+    for (int i = 0; i < MAXLEDLENGTH; i++) {
+      if (otaBlinkState) {
+        leds[i].r = r;
+        leds[i].g = g;
+        leds[i].b = b;
+      } else {
+        leds[i].r = 0;
+        leds[i].g = 0;
+        leds[i].b = 0;
+      }
+    }
+    FastLED.show();
+  }
+}
+
+void otaBlinkColorNTimes(uint8_t r, uint8_t g, uint8_t b, int n) {
+  for (int i = 0; i < n; i++) {
+    for (int j = 0; j < MAXLEDLENGTH; j++) {
+      leds[j].r = r;
+      leds[j].g = g;
+      leds[j].b = b;
+    }
+    FastLED.show();
+    delay(150);
+    for (int j = 0; j < MAXLEDLENGTH; j++) {
+      leds[j].r = 0;
+      leds[j].g = 0;
+      leds[j].b = 0;
+    }
+    FastLED.show();
+    delay(150);
+  }
+}
+void otaShowColorForSeconds(uint8_t r, uint8_t g, uint8_t b, int seconds) {
+  for (int j = 0; j < MAXLEDLENGTH; j++) {
+    leds[j].r = r;
+    leds[j].g = g;
+    leds[j].b = b;
+  }
+  FastLED.show();
+  delay(seconds * 1000);
+  for (int j = 0; j < MAXLEDLENGTH; j++) {
+    leds[j].r = 0;
+    leds[j].g = 0;
+    leds[j].b = 0;
+  }
+  FastLED.show();
+}
+const uint8_t otaSequence[12] = {4,4,4,7,1,9,4,4,4,7,1,9};
+
+bool isOtaSequence() {
+  for (int i = 0; i < 12; i++) {
+    if (dmxChannels[20 + i] != otaSequence[i]) return false;
+  }
+  return true;
+}
+
+void checkForOtaUpdate() {
+  static bool alreadyTriggered = false;
+  if (isOtaSequence() && !otaInProgress && !alreadyTriggered) {
+    otaInProgress = true;
+    alreadyTriggered = true;
+    Serial.println("Déclenchement de la mise à jour OTA...");
+    WiFi.disconnect();
+    WiFi.mode(WIFI_STA);
+    WiFi.begin("mrVOOlpy", "youhououhou");
+    unsigned long startAttempt = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 10000) {
+      otaBlinkColor(0,0,255); // BLEU pendant la connexion
+      delay(10);
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.println("WiFi connecté, lancement de la mise à jour...");
+      bool updateSuccess = false;
+      while (true) {
+        otaBlinkColor(0,0,255); // BLEU pendant la mise à jour
+        WiFiClient client;
+        t_httpUpdate_return ret = ESPhttpUpdate.update(client, "http://mrledtubefirmware.gaetanstreel.com/firmware.bin");
+        if (ret == HTTP_UPDATE_OK) {
+          Serial.println("Mise à jour réussie, redémarrage...");
+          otaShowColorForSeconds(0,255,0,3); // Vert continu 3s
+          ESP.restart();
+        } else {
+          Serial.printf("Erreur OTA (%d): %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
+          otaShowColorForSeconds(255,0,0,3); // Rouge continu 3s
+          delay(2000);
+          break;
+        }
+      }
+      otaInProgress = false;
+    } else {
+      Serial.println("Échec connexion WiFi pour OTA");
+      otaShowColorForSeconds(255,0,0,3); // Rouge continu 3s
+      otaInProgress = false;
+    }
+  }
+  if (!isOtaSequence()) {
+    alreadyTriggered = false;
+  }
+}
+
+
+
 void setup()
 {
   randomHueOffset = rand()%256;
@@ -818,11 +931,13 @@ void loop()
 {
   button1.tick(); // fonction vérifiant l'état du bouton
 
-  if (etat == RUNNING)
+  checkForOtaUpdate();
+
+  if (etat == RUNNING && !otaInProgress)
   {
     DMX2LEDSTRIP(); // on met à jour l'affichage du ledstrip
   }
-  else // etat==SETUP -> on fait clignoter un nombre de LEDs correspondant au groupe du tube
+  else if (!otaInProgress) // etat==SETUP -> on fait clignoter un nombre de LEDs correspondant au groupe du tube
   {
     FastLED.clear();
     if (setupTubeNumber == 0)
@@ -842,4 +957,7 @@ void loop()
     FastLED.show();
     delay(100);
   }
+  // Si otaInProgress, l'affichage est géré par otaBlinkRed()
 }
+
+
