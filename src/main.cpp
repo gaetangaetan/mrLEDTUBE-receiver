@@ -78,6 +78,22 @@ Le numéro de groupe est enregistré en EEPROM
 #define DEGRADE_FACTOR 0.5 // chatgpt - Proportion du segment utilisée pour le dégradé (0.5 = moitié du segment)
 #define FADE_SPEED 0.02 // chatgpt -  Vitesse de transition : plus petit = transitions plus longues
 
+#define SIGNATURE_A 0x3C // 0011 1100
+#define SIGNATURE_B 0x61 // 0110 0001
+#define SIGNATURE_C 0x05 // 0000 0101
+
+#define SIGNATURE_NORMAL_MODE  0xA7 // 1010 0111
+#define SIGNATURE_EXTENDED_MODE 0x4D // 0100 1101
+
+#define DATA_ADDRESS_SIGNATURE_A 0 // premier byte de la signature
+#define DATA_ADDRESS_SIGNATURE_B 1 // deuxième byte de la signature
+#define DATA_ADDRESS_SIGNATURE_C 2 // troisième byte de la signature
+
+#define DATA_ADDRESS_EXTENDED_MODE 3 
+
+#define EEPROM_ADDR_EXTENDED_MODE 12
+
+bool extendedMode = false;
 
 #include <Arduino.h>
 #include <EEPROM.h>
@@ -157,17 +173,41 @@ typedef struct struct_dmx_packet // on divise les 512 adresses en 4 blocs de 128
 
 struct_dmx_packet incomingDMXPacket; 
 
+// Ajout de la structure pour le mode étendu
+typedef struct struct_dmx_packet_ext {
+  uint8_t blockNumber;
+  uint8_t dmxvalues[128];
+  uint8_t data[100];
+} struct_dmx_packet_ext;
+
 void OnDataSent(u8 *mac_addr, u8 status) {} // quand on utilise ESP_NOW, la fonction OnDataSent doit être déclarée mais, concrètement, on n'en a pas besoin (pour l'instant, aucune donnée n'est renvoyée par les récepteurs à l'émetteur)
 
 // Callback when data is received
 // à chaque fois qu'un bloc de 128 valeurs est reçu par ESP_NOW, on met à jour ces valeurs dans le tableau dmxChannels 
 void OnDataRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len)
 {
-  memcpy(&incomingDMXPacket, incomingData, sizeof(incomingDMXPacket));
-  uint8_t packetNumber = incomingDMXPacket.blockNumber;
-  for (int i = 0; i < 128; i++)
-  {
-    dmxChannels[(packetNumber * 128) + i] = incomingDMXPacket.dmxvalues[i];
+  if (extendedMode) {
+    if (len < 3 ||
+        incomingData[DATA_ADDRESS_SIGNATURE_A] != SIGNATURE_A ||
+        incomingData[DATA_ADDRESS_SIGNATURE_B] != SIGNATURE_B ||
+        incomingData[DATA_ADDRESS_SIGNATURE_C] != SIGNATURE_C) {
+      // Signature incorrecte, on ignore le paquet
+      return;
+    }
+    // Utilisation de la structure étendue
+    struct_dmx_packet_ext incomingDMXPacketExt;
+    memcpy(&incomingDMXPacketExt, incomingData, sizeof(incomingDMXPacketExt));
+    uint8_t packetNumber = incomingDMXPacketExt.blockNumber;
+    for (int i = 0; i < 128; i++) {
+      dmxChannels[(packetNumber * 128) + i] = incomingDMXPacketExt.dmxvalues[i];
+    }
+  } else {
+    memcpy(&incomingDMXPacket, incomingData, sizeof(incomingDMXPacket));
+    uint8_t packetNumber = incomingDMXPacket.blockNumber;
+    for (int i = 0; i < 128; i++)
+    {
+      dmxChannels[(packetNumber * 128) + i] = incomingDMXPacket.dmxvalues[i];
+    }
   }
 }
 
@@ -731,55 +771,6 @@ break;
   delay(1);
 }
 
-// ----- button 1 callback functions
-void click1() // en mode SETUP, chaque clic simple sur le bouton incrémente le numéro de groupe
-{
-  if (etat == RUNNING)
-    return; // en mode RUNNING, on ignore cette action
-  setupTubeNumber = (setupTubeNumber + 1) % NBGROUPS;
-}
-
-void longPressStart1() // un clic long, permet de passer de RUNNING à SETUP et inversement (à la sortie du mode SETUP, on enregistre les données en mémoire persistante)
-{
-  Serial.print("longpress | etat = ");
-  Serial.println((etat ? "RUNNING" : "SETUP"));
-
-  if (etat == SETUP) // avant de sortir du SETUP, on enregistre les données en mémoire persistante
-  {
-    EEPROM.write(0, setupAddress);
-    EEPROM.write(4, setupMode);
-    EEPROM.write(8, setupTubeNumber);
-    Serial.print("Commit =  ");
-    Serial.println(EEPROM.commit());
-  }
-
-  etat = !etat;
-}
-
-// --- Ajout OTA ---
-bool otaInProgress = false;
-unsigned long otaBlinkTimer = 0;
-bool otaBlinkState = false;
-
-void otaBlinkColor(uint8_t r, uint8_t g, uint8_t b) {
-  unsigned long now = millis();
-  if (now - otaBlinkTimer > 250) { // 2 Hz
-    otaBlinkTimer = now;
-    otaBlinkState = !otaBlinkState;
-    for (int i = 0; i < MAXLEDLENGTH; i++) {
-      if (otaBlinkState) {
-        leds[i].r = r;
-        leds[i].g = g;
-        leds[i].b = b;
-      } else {
-        leds[i].r = 0;
-        leds[i].g = 0;
-        leds[i].b = 0;
-      }
-    }
-    FastLED.show();
-  }
-}
 
 void otaBlinkColorNTimes(uint8_t r, uint8_t g, uint8_t b, int n) {
   for (int i = 0; i < n; i++) {
@@ -815,6 +806,81 @@ void otaShowColorForSeconds(uint8_t r, uint8_t g, uint8_t b, int seconds) {
   FastLED.show();
 }
 const uint8_t otaSequence[12] = {4,4,4,7,1,9,4,4,4,7,1,9};
+
+
+// ----- button 1 callback functions
+void click1() // en mode SETUP, chaque clic simple sur le bouton incrémente le numéro de groupe
+{
+  if (etat == RUNNING)
+    return; // en mode RUNNING, on ignore cette action
+  setupTubeNumber = (setupTubeNumber + 1) % NBGROUPS;
+  Serial.print("click1");
+}
+
+void longPressStart1() // un clic long, permet de passer de RUNNING à SETUP et inversement (à la sortie du mode SETUP, on enregistre les données en mémoire persistante)
+{
+  Serial.print("longpress | etat = ");
+  Serial.println((etat ? "RUNNING" : "SETUP"));
+
+  if (etat == SETUP) // avant de sortir du SETUP, on enregistre les données en mémoire persistante
+  {
+    EEPROM.write(0, setupAddress);
+    EEPROM.write(4, setupMode);
+    EEPROM.write(8, setupTubeNumber);
+    Serial.print("Commit =  ");
+    Serial.println(EEPROM.commit());
+  }
+
+  etat = !etat;
+}
+
+// Callback pour le multi-clic (quadruple clic)
+void quadrupleClick1() {
+  
+  int nClicks = button1.getNumberClicks();
+  Serial.println("quadrupleClick1");
+  Serial.print("Nombre de clics : ");
+  Serial.println(nClicks);
+  if (nClicks == 4) {
+    extendedMode = !extendedMode;
+    EEPROM.write(EEPROM_ADDR_EXTENDED_MODE, extendedMode ? 1 : 0);
+    EEPROM.commit();
+    if (extendedMode) {
+      // Clignotement rouge 3s
+      otaShowColorForSeconds(255, 0, 0, 3);
+    } else {
+      // Clignotement vert 3s
+      otaShowColorForSeconds(0, 255, 0, 3);
+    }
+  }
+}
+
+// --- Ajout OTA ---
+bool otaInProgress = false;
+unsigned long otaBlinkTimer = 0;
+bool otaBlinkState = false;
+
+void otaBlinkColor(uint8_t r, uint8_t g, uint8_t b) {
+  unsigned long now = millis();
+  if (now - otaBlinkTimer > 250) { // 2 Hz
+    otaBlinkTimer = now;
+    otaBlinkState = !otaBlinkState;
+    for (int i = 0; i < MAXLEDLENGTH; i++) {
+      if (otaBlinkState) {
+        leds[i].r = r;
+        leds[i].g = g;
+        leds[i].b = b;
+      } else {
+        leds[i].r = 0;
+        leds[i].g = 0;
+        leds[i].b = 0;
+      }
+    }
+    FastLED.show();
+  }
+}
+
+
 
 bool isOtaSequence() {
   for (int i = 0; i < 12; i++) {
@@ -904,12 +970,14 @@ void setup()
   // link the button 1 functions.
   button1.attachClick(click1);
   button1.attachLongPressStart(longPressStart1);
+  button1.attachMultiClick(quadrupleClick1);
 
   EEPROM.begin(EEPROM_SIZE);
 
   setupAddress = EEPROM.read(0);
   setupMode = EEPROM.read(4);
   setupTubeNumber = EEPROM.read(8);
+  extendedMode = (EEPROM.read(EEPROM_ADDR_EXTENDED_MODE) == 1);
   if ((setupAddress < 1) || (setupAddress > 512))
     setupAddress = 1;
   if ((setupMode < 1) || (setupMode > 255))
@@ -926,6 +994,8 @@ void setup()
   Serial.print(setupMode);
   Serial.print(" | Tube Group = ");
   Serial.println(setupTubeNumber);
+  Serial.print(" | Mode étendu = ");
+  Serial.println(extendedMode);
 }
 
 void loop() 
