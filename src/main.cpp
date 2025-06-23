@@ -5,7 +5,7 @@
  *           - Le bouton "Toggle Mode" passe entre les modes
  *           - Mode MANUAL avec tableau DMX interactif (clic & drag vertical) limité à 128 canaux
  *           - Limiter l'affichage à 128, 256, 384 ou 512 canaux
- * corrections
+ * corrections 2
  ************************************************************************/
 
 #include <Arduino.h>
