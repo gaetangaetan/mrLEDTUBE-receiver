@@ -108,7 +108,7 @@ bool extendedMode = false;
 #include <WiFiManager.h> 
 WiFiManager wifiManager;
 #define APNAME "mrLEDTUBE22"
-#define VERSION 22 // numéro de version pour m'y retrouver pendant le développement
+#define VERSION 234 // numéro de version pour m'y retrouver pendant le développement
 
 #define EEPROM_SIZE 32
 
@@ -119,7 +119,7 @@ CRGB flickerLeds[MAXLEDLENGTH]; // objet représentant la mémoire du ledstrip p
 uint8_t ledsTemp[MAXLEDLENGTH][3]; // tableau représentant les valeurs r g b de chaque led du ledstrip
 
 #include "OneButton.h"
-OneButton button1(BUTTONPIN, true); // Setup a new OneButto²n on pin BUTTONPIN.
+OneButton button1(BUTTONPIN, true); // Setup a new OneButton on pin BUTTONPIN.
 
 #include <ESP8266WiFiMulti.h>
 #include <espnow.h> 
@@ -173,12 +173,15 @@ typedef struct struct_dmx_packet // on divise les 512 adresses en 4 blocs de 128
 
 struct_dmx_packet incomingDMXPacket; 
 
+
 // Ajout de la structure pour le mode étendu
 typedef struct struct_dmx_packet_ext {
   uint8_t blockNumber;
   uint8_t dmxvalues[128];
   uint8_t data[100];
 } struct_dmx_packet_ext;
+
+struct_dmx_packet_ext incomingDMXPacketExt;
 
 void OnDataSent(u8 *mac_addr, u8 status) {} // quand on utilise ESP_NOW, la fonction OnDataSent doit être déclarée mais, concrètement, on n'en a pas besoin (pour l'instant, aucune donnée n'est renvoyée par les récepteurs à l'émetteur)
 
@@ -187,16 +190,17 @@ void OnDataSent(u8 *mac_addr, u8 status) {} // quand on utilise ESP_NOW, la fonc
 void OnDataRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len)
 {
   if (extendedMode) {
-    if (len < 3 ||
-        incomingData[DATA_ADDRESS_SIGNATURE_A] != SIGNATURE_A ||
-        incomingData[DATA_ADDRESS_SIGNATURE_B] != SIGNATURE_B ||
-        incomingData[DATA_ADDRESS_SIGNATURE_C] != SIGNATURE_C) {
+    // On copie d'abord le paquet dans la structure
+    memcpy(&incomingDMXPacketExt, incomingData, sizeof(incomingDMXPacketExt));
+    // Puis on vérifie la signature dans le champ data[]
+    //Serial.print("Signature A: ");
+    //Serial.println(incomingDMXPacketExt.data[DATA_ADDRESS_SIGNATURE_A], HEX);
+    if (incomingDMXPacketExt.data[DATA_ADDRESS_SIGNATURE_A] != SIGNATURE_A ||
+        incomingDMXPacketExt.data[DATA_ADDRESS_SIGNATURE_B] != SIGNATURE_B ||
+        incomingDMXPacketExt.data[DATA_ADDRESS_SIGNATURE_C] != SIGNATURE_C) {
       // Signature incorrecte, on ignore le paquet
       return;
     }
-    // Utilisation de la structure étendue
-    struct_dmx_packet_ext incomingDMXPacketExt;
-    memcpy(&incomingDMXPacketExt, incomingData, sizeof(incomingDMXPacketExt));
     uint8_t packetNumber = incomingDMXPacketExt.blockNumber;
     for (int i = 0; i < 128; i++) {
       dmxChannels[(packetNumber * 128) + i] = incomingDMXPacketExt.dmxvalues[i];
@@ -933,7 +937,76 @@ void checkForOtaUpdate() {
   }
 }
 
+// Fonction pour afficher un chiffre (0-9) avec les pixels 10,20,30,40,50,60,70,80,90
+void displayDigit(uint8_t digit, uint8_t r, uint8_t g, uint8_t b, int durationSeconds) {
+  Serial.print("  displayDigit: chiffre=");
+  Serial.print(digit);
+  Serial.print(" RGB(");
+  Serial.print(r);
+  Serial.print(",");
+  Serial.print(g);
+  Serial.print(",");
+  Serial.print(b);
+  Serial.print(") durée=");
+  Serial.print(durationSeconds);
+  Serial.println("s");
+  
+  // Éteindre tous les pixels
+  FastLED.clear();
+  
+  // Allumer les pixels correspondant au chiffre
+  // Les pixels utilisés sont : 10, 20, 30, 40, 50, 60, 70, 80, 90 (indices 9, 19, 29, 39, 49, 59, 69, 79, 89)
+  for (int i = 0; (i < digit) && (i < 9); i++) {
+    int pixelIndex = 10 + (i * 10) - 1; // -1 car les indices commencent à 0
+    if (pixelIndex < MAXLEDLENGTH) {
+      leds[pixelIndex].r = r;
+      leds[pixelIndex].g = g;
+      leds[pixelIndex].b = b;
+      Serial.print("    Allumage pixel ");
+      Serial.println(pixelIndex + 1); // +1 pour afficher les numéros humains
+    }
+  }
+  
+  FastLED.show();
+  delay(durationSeconds * 1000);
+  
+  // Éteindre tous les pixels
+  FastLED.clear();
+  FastLED.show();
+}
 
+// Fonction pour afficher le numéro de version au démarrage
+void displayVersionNumber() {
+  // Décomposer le numéro de version en centaines, dizaines, unités
+  delay(2000); // Délai plus long pour s'assurer que tout est initialisé
+  uint8_t centaines = (VERSION / 100) % 10;
+  uint8_t dizaines = (VERSION / 10) % 10;
+  uint8_t unites = VERSION % 10;
+  
+  Serial.println("=== Affichage du numéro de version ===");
+  Serial.print("VERSION = ");
+  Serial.print(VERSION);
+  Serial.print(" -> centaines=");
+  Serial.print(centaines);
+  Serial.print(", dizaines=");
+  Serial.print(dizaines);
+  Serial.print(", unités=");
+  Serial.println(unites);
+  
+  // Afficher les centaines en rouge (2 secondes)
+  Serial.println("Affichage centaines en ROUGE...");
+  displayDigit(centaines, 255, 0, 0, 2);
+  
+  // Afficher les dizaines en vert (2 secondes)
+  Serial.println("Affichage dizaines en VERT...");
+  displayDigit(dizaines, 0, 255, 0, 2);
+  
+  // Afficher les unités en bleu (2 secondes)
+  Serial.println("Affichage unités en BLEU...");
+  displayDigit(unites, 0, 0, 255, 2);
+  
+  Serial.println("=== Fin affichage version ===");
+}
 
 void setup()
 {
@@ -947,6 +1020,9 @@ void setup()
   digitalWrite(BUTTONGROUNDPIN, LOW); // on utilise BUTTONGROUNDPIN comme GND pour le bouton 1
 
   FastLED.addLeds<WS2812, DATA_PIN, GRB>(leds, MAXLEDLENGTH); // Création d'un objet représentant le ledstrip pour FastLED // GRB ordering is typical
+  FastLED.clear();
+  FastLED.show();
+  delay(100); // Laisser le temps à FastLED de s'initialiser
 
   WiFi.disconnect();
   ESP.eraseConfig(); // !!! COMMANDES IMPORTANTES !!! ESP_NOW peut parfois ne pas fonctionner si on n'exécute pas pas ces deux commandes. Je ne suis pas sûr que ce soit écrit dans la doc. C'est peut-être même un petit bug. Bref, il faut le savoir :)
@@ -996,6 +1072,9 @@ void setup()
   Serial.println(setupTubeNumber);
   Serial.print(" | Mode étendu = ");
   Serial.println(extendedMode);
+
+  // Affichage visuel du numéro de version au démarrage
+  displayVersionNumber();
 }
 
 void loop() 
