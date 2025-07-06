@@ -1,6 +1,9 @@
 /*
-début d'une version qui réagira au gun
-début d'une version au mode étendu
+Cette version servira à contrôler un gradateur à un seul canal.
+Le contrôleur n'aura pas de bouton. Je vais donc ajouter un mécanisme pour pouvoir régler le canal : 
+Quand les canaux DMX 1 et 2 vaudront 254 tous les deux, le contrôleur enregistrera en mémoire persistante la valeur représentée par la somme des canaux DMX 3 et 4.
+
+
 
 Ce code fait partie d'un système de contrôle DMX sans fil pour ledstrip.
 
