@@ -66,7 +66,7 @@ Le numéro de groupe est enregistré en EEPROM
                           
                           // !!!  QUAND LE STRIP LED EST ALIMENTÉ PAR L'ESP (en cours de programmation, par exemple), NE PAS ALLUMER PLUS D'UNE DIZAINE DE LEDS !!!
                           
-                          // en général, la longueur n'a pas particulièrement d'influence sur la latence du contrôleur mais ça peut être utile de la régler pour les programmes qui font le "tour"
+                          // en général, la longueur n'a pas particulièrement d'influence sur la latence du contrôleur mais ça peut être utile de la régler pour les programmes qui font le "tour" 
                           // du strip led (comme des segments de leds qui vont de bas en haut par exemple) 
                           // ou pour être sûr de ne pas demander plus de courant que ce que l'alimentation prévue ne peut fournir
                           
@@ -76,19 +76,23 @@ Le numéro de groupe est enregistré en EEPROM
 #define DEGRADE_FACTOR 0.5 // chatgpt - Proportion du segment utilisée pour le dégradé (0.5 = moitié du segment)
 #define FADE_SPEED 0.02 // chatgpt -  Vitesse de transition : plus petit = transitions plus longues
 
+// Signature pour valider les paquets Poulpylights
+#define SIGNATURE_A 0x3C // 0011 1100
+#define SIGNATURE_B 0x61 // 0110 0001  
+#define SIGNATURE_C 0x05 // 0000 0101
 
 #include <Arduino.h>
 #include <EEPROM.h>
 #include <ESP8266WiFi.h>
 
-#include <ESP8266HTTPClient.h>
-#include <ESP8266httpUpdate.h>
+// #include <ESP8266HTTPClient.h>
+// #include <ESP8266httpUpdate.h>
 
 
-#include <DNSServer.h>
-#include <ESP8266WebServer.h>
-#include <WiFiManager.h> 
-WiFiManager wifiManager;
+// #include <DNSServer.h>
+// #include <ESP8266WebServer.h>
+// #include <WiFiManager.h> 
+// WiFiManager wifiManager;
 #define APNAME "mrLEDTUBE15"
 #define VERSION 15 // numéro de version pour m'y retrouver pendant le développement
 
@@ -103,7 +107,7 @@ uint8_t ledsTemp[MAXLEDLENGTH][3]; // tableau représentant les valeurs r g b de
 #include "OneButton.h"
 OneButton button1(BUTTONPIN, true); // Setup a new OneButton on pin BUTTONPIN.
 
-#include <ESP8266WiFiMulti.h>
+//#include <ESP8266WiFiMulti.h>
 #include <espnow.h> 
 // library permettant d'utiliser le protocole de communication sans fil propriétaire d'Espressif (faire "comme du wifi" sans passer par toutes les couches du wifi)
 // exemple : https://randomnerdtutorials.com/esp-now-esp32-arduino-ide/
@@ -149,8 +153,9 @@ uint8_t dmxChannels[512]; // tableau dans lequel seront stockées les valeurs de
 
 typedef struct struct_dmx_packet // on divise les 512 adresses en 4 blocs de 128 adresses (on ne peut pas tout envoyer en une fois car la taille maximale des packets transmis par ESP-NOW est limitée à 250 bytes)
 {                                
-  uint8_t blockNumber;    // 4 blocs
-  uint8_t dmxvalues[128]; // de 128 valeurs
+  uint8_t blockNumber;    // numéro du bloc (0..3)
+  uint8_t dmxvalues[128]; // 128 valeurs DMX
+  uint8_t data[100];      // données additionnelles (dont la signature en data[0..2])
 } struct_dmx_packet;
 
 struct_dmx_packet incomingDMXPacket; 
@@ -158,17 +163,32 @@ struct_dmx_packet incomingDMXPacket;
 void OnDataSent(u8 *mac_addr, u8 status) {} // quand on utilise ESP_NOW, la fonction OnDataSent doit être déclarée mais, concrètement, on n'en a pas besoin (pour l'instant, aucune donnée n'est renvoyée par les récepteurs à l'émetteur)
 
 // Callback when data is received
-// à chaque fois qu'un bloc de 128 valeurs est reçu par ESP_NOW, on met à jour ces valeurs dans le tableau dmxChannels 
+// à chaque fois qu'un bloc de 128 valeurs est reçu par ESP_NOW, on met à jour ces valeurs dans le tableau dmxChannels
 void OnDataRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len)
 {
-  memcpy(&incomingDMXPacket, incomingData, sizeof(incomingDMXPacket));
-  uint8_t packetNumber = incomingDMXPacket.blockNumber;
-  for (int i = 0; i < 128; i++)
+  // Vérification de la taille d'un paquet DMX
+  if (len == sizeof(struct_dmx_packet))
   {
-    dmxChannels[(packetNumber * 128) + i] = incomingDMXPacket.dmxvalues[i];
+    memcpy(&incomingDMXPacket, incomingData, sizeof(incomingDMXPacket));
+
+    // Vérifier la signature pour valider le paquet
+    if (incomingDMXPacket.data[0] == SIGNATURE_A &&
+        incomingDMXPacket.data[1] == SIGNATURE_B &&
+        incomingDMXPacket.data[2] == SIGNATURE_C)
+    {
+
+      uint8_t packetNumber = incomingDMXPacket.blockNumber;
+      if (packetNumber < 4)
+      {
+
+        for (int i = 0; i < 128; i++)
+        {
+          dmxChannels[(packetNumber * 128) + i] = incomingDMXPacket.dmxvalues[i];
+        }
+      }
+    }
   }
 }
-
 
 struct Color
 { // type utilisé par la fonction convertToColor
@@ -787,6 +807,8 @@ void setup()
   esp_now_register_recv_cb(OnDataRecv);
 
   // link the button 1 functions.
+  button1.setDebounceMs(50);
+  button1.setPressMs(1000); 
   button1.attachClick(click1);
   button1.attachLongPressStart(longPressStart1);
 
