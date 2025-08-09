@@ -81,12 +81,15 @@ Le numéro de groupe est enregistré en EEPROM
 #define SIGNATURE_B 0x61 // 0110 0001  
 #define SIGNATURE_C 0x05 // 0000 0101
 
+// Code de commande pour la mise à jour OTA
+#define OTA_UPDATE_CMD 0xFA // Code de commande pour lancer une mise à jour firmware
+
 #include <Arduino.h>
 #include <EEPROM.h>
 #include <ESP8266WiFi.h>
 
-// #include <ESP8266HTTPClient.h>
-// #include <ESP8266httpUpdate.h>
+#include <ESP8266HTTPClient.h>
+#include <ESP8266httpUpdate.h>
 
 
 // #include <DNSServer.h>
@@ -162,6 +165,178 @@ struct_dmx_packet incomingDMXPacket;
 
 void OnDataSent(u8 *mac_addr, u8 status) {} // quand on utilise ESP_NOW, la fonction OnDataSent doit être déclarée mais, concrètement, on n'en a pas besoin (pour l'instant, aucune donnée n'est renvoyée par les récepteurs à l'émetteur)
 
+// ========== FONCTIONNALITÉ OTA (MISE À JOUR FIRMWARE) ==========
+// Fonction encapsulée pour gérer la mise à jour OTA du firmware
+// Paramètres extraits du paquet ESP-NOW selon le format :
+// data[4] = longueur SSID, data[5...] = SSID, data[X] = longueur password, data[X+1...] = password
+void handleOTAUpdate(uint8_t* otaData) {
+  Serial.println("========== DÉBUT MISE À JOUR OTA ==========");
+  
+  // URL fixe du firmware
+  const char* firmwareURL = "https://mrledtubefirmware.gaetanstreel.com/firmware.bin";
+  
+  // Extraction des informations WiFi depuis le paquet
+  uint8_t ssidLength = otaData[4];
+  if (ssidLength == 0 || ssidLength > 32) {
+    Serial.println("ERREUR: Longueur SSID invalide");
+    return;
+  }
+  
+  // Extraction du SSID
+  char ssid[33]; // 32 caractères max + null terminator
+  memcpy(ssid, &otaData[5], ssidLength);
+  ssid[ssidLength] = '\0';
+  
+  // Extraction de la longueur du password
+  uint8_t passwordLength = otaData[5 + ssidLength];
+  if (passwordLength > 63) { // WPA2 limite à 63 caractères
+    Serial.println("ERREUR: Longueur password invalide");
+    return;
+  }
+  
+  // Extraction du password
+  char password[64]; // 63 caractères max + null terminator
+  if (passwordLength > 0) {
+    memcpy(password, &otaData[6 + ssidLength], passwordLength);
+  }
+  password[passwordLength] = '\0';
+  
+  Serial.print("Connexion au WiFi: ");
+  Serial.print(ssid);
+  Serial.print(" / ");
+  Serial.println(passwordLength > 0 ? "****" : "(pas de mot de passe)");
+  
+  // Indication visuelle : clignotement bleu pendant la connexion WiFi
+  FastLED.clear();
+  for (int i = 0; i < 5; i++) {
+    for (int j = 0; j < min(10, MAXLEDLENGTH); j++) {
+      leds[j] = CRGB::Blue;
+    }
+    FastLED.show();
+    delay(200);
+    FastLED.clear();
+    FastLED.show();
+    delay(200);
+  }
+  
+  // Connexion au WiFi
+  WiFi.disconnect();
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  
+  int wifiTimeout = 0;
+  while (WiFi.status() != WL_CONNECTED && wifiTimeout < 30) { // 30 secondes maximum
+    delay(1000);
+    wifiTimeout++;
+    Serial.print(".");
+    
+    // Indication visuelle : une LED bleue qui progresse
+    FastLED.clear();
+    for (int j = 0; j < min(wifiTimeout, MAXLEDLENGTH); j++) {
+      leds[j] = CRGB::Blue;
+    }
+    FastLED.show();
+  }
+  
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("\nERREUR: Connexion WiFi échouée");
+    // Indication visuelle : clignotement rouge
+    for (int i = 0; i < 10; i++) {
+      FastLED.clear();
+      for (int j = 0; j < min(5, MAXLEDLENGTH); j++) {
+        leds[j] = CRGB::Red;
+      }
+      FastLED.show();
+      delay(100);
+      FastLED.clear();
+      FastLED.show();
+      delay(100);
+    }
+    
+    // Retour au mode ESP-NOW
+    WiFi.disconnect();
+    WiFi.mode(WIFI_STA);
+    esp_now_init();
+    esp_now_register_recv_cb(OnDataRecv);
+    return;
+  }
+  
+  Serial.println("\nWiFi connecté !");
+  Serial.print("Adresse IP: ");
+  Serial.println(WiFi.localIP());
+  
+  // Indication visuelle : vert fixe pendant le téléchargement
+  FastLED.clear();
+  for (int j = 0; j < MAXLEDLENGTH; j++) {
+    leds[j] = CRGB::Green;
+  }
+  FastLED.show();
+  
+  // Mise à jour OTA
+  Serial.print("Téléchargement du firmware depuis: ");
+  Serial.println(firmwareURL);
+  
+  WiFiClient client;
+  t_httpUpdate_return result = ESPhttpUpdate.update(client, firmwareURL);
+  
+  switch (result) {
+    case HTTP_UPDATE_FAILED:
+      Serial.printf("ERREUR: Mise à jour échouée (%d): %s\n", 
+                    ESPhttpUpdate.getLastError(), 
+                    ESPhttpUpdate.getLastErrorString().c_str());
+      
+      // Indication visuelle : clignotement rouge rapide
+      for (int i = 0; i < 20; i++) {
+        FastLED.clear();
+        for (int j = 0; j < MAXLEDLENGTH; j++) {
+          leds[j] = CRGB::Red;
+        }
+        FastLED.show();
+        delay(50);
+        FastLED.clear();
+        FastLED.show();
+        delay(50);
+      }
+      break;
+      
+    case HTTP_UPDATE_NO_UPDATES:
+      Serial.println("Aucune mise à jour disponible");
+      
+      // Indication visuelle : orange fixe 2 secondes
+      FastLED.clear();
+      for (int j = 0; j < MAXLEDLENGTH; j++) {
+        leds[j] = CRGB::Orange;
+      }
+      FastLED.show();
+      delay(2000);
+      break;
+      
+    case HTTP_UPDATE_OK:
+      Serial.println("Mise à jour réussie ! Redémarrage...");
+      
+      // Indication visuelle : blanc fixe 1 seconde puis redémarrage
+      FastLED.clear();
+      for (int j = 0; j < MAXLEDLENGTH; j++) {
+        leds[j] = CRGB::White;
+      }
+      FastLED.show();
+      delay(1000);
+      
+      ESP.restart(); // Le redémarrage ne sera jamais atteint car l'OTA redémarre déjà
+      break;
+  }
+  
+  // Si on arrive ici, c'est qu'il y a eu une erreur ou aucune mise à jour
+  // Retour au mode ESP-NOW
+  WiFi.disconnect();
+  WiFi.mode(WIFI_STA);
+  esp_now_init();
+  esp_now_register_recv_cb(OnDataRecv);
+  
+  Serial.println("========== FIN MISE À JOUR OTA ==========");
+}
+// ========== FIN FONCTIONNALITÉ OTA ==========
+
 // Callback when data is received
 // à chaque fois qu'un bloc de 128 valeurs est reçu par ESP_NOW, on met à jour ces valeurs dans le tableau dmxChannels
 void OnDataRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len)
@@ -176,11 +351,20 @@ void OnDataRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len)
         incomingDMXPacket.data[1] == SIGNATURE_B &&
         incomingDMXPacket.data[2] == SIGNATURE_C)
     {
+      // ========== GESTION COMMANDE OTA ==========
+      // Vérifier si c'est un paquet de commande OTA
+      if (incomingDMXPacket.data[3] == OTA_UPDATE_CMD)
+      {
+        Serial.println("Commande OTA détectée !");
+        handleOTAUpdate(incomingDMXPacket.data);
+        return; // Sortir immédiatement après traitement OTA
+      }
+      // ========== FIN GESTION COMMANDE OTA ==========
 
+      // Traitement normal des paquets DMX (si data[3] != OTA_UPDATE_CMD)
       uint8_t packetNumber = incomingDMXPacket.blockNumber;
       if (packetNumber < 4)
       {
-
         for (int i = 0; i < 128; i++)
         {
           dmxChannels[(packetNumber * 128) + i] = incomingDMXPacket.dmxvalues[i];
