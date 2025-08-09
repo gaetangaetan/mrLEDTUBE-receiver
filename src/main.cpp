@@ -81,8 +81,13 @@ Le numéro de groupe est enregistré en EEPROM
 #define SIGNATURE_B 0x61 // 0110 0001  
 #define SIGNATURE_C 0x05 // 0000 0101
 
-// Code de commande pour la mise à jour OTA
+// Codes de commande 
 #define OTA_UPDATE_CMD 0xFA // Code de commande pour lancer une mise à jour firmware
+#define REQUEST_MAC_CMD 0xFB // Code de commande pour demander l'adresse MAC
+#define RESPONSE_MAC_CMD 0xFC // Code de commande pour envoyer l'adresse MAC
+#define ENTER_REMOTE_SETUP_CMD 0xFD // Code de commande pour entrer en setup à distance
+#define EXIT_REMOTE_SETUP_CMD 0xFE // Code de commande pour sortir du setup à distance
+#define SET_GROUP_NUMBER_CMD 0xFF // Code de commande pour définir le numéro de groupe
 
 #include <Arduino.h>
 #include <EEPROM.h>
@@ -96,8 +101,8 @@ Le numéro de groupe est enregistré en EEPROM
 // #include <ESP8266WebServer.h>
 // #include <WiFiManager.h> 
 // WiFiManager wifiManager;
-#define APNAME "mrLEDTUBE15"
-#define VERSION 15 // numéro de version pour m'y retrouver pendant le développement
+#define APNAME "mrLEDTUBE16"
+#define VERSION 16 // numéro de version pour m'y retrouver pendant le développement
 
 #define EEPROM_SIZE 32
 
@@ -146,6 +151,11 @@ uint8_t randomHueOffset =0;
 #define SETUP false
 
 bool etat = RUNNING; // etat peut être en mode SETUP ou RUNNING : pour entrer ou sortir du SETUP, il faut appuyer longuement sur le bouton, le ledstrip affiche alors le numéro n du groupe en allumant n leds vertes
+
+// ========== VARIABLES POUR LE SETUP À DISTANCE ==========
+bool remoteSetupMode = false; // Mode setup à distance activé
+unsigned long lastBlinkTime = 0; // Pour le clignotement du numéro de groupe
+bool blinkState = false; // État actuel du clignotement
                      // on peut changer de groupe en appuyant  sur le bouton, on incrémente le numéro de groupe jusque la limite (fixée à 10 pour le moment) au delà de laquelle on recommence au groupe 0
                      // le groupe 0 conrrespond à 1 led rouge pour le distinguer du groupe 1 (une led verte)
 
@@ -161,9 +171,14 @@ typedef struct struct_dmx_packet // on divise les 512 adresses en 4 blocs de 128
   uint8_t data[100];      // données additionnelles (dont la signature en data[0..2])
 } struct_dmx_packet;
 
-struct_dmx_packet incomingDMXPacket; 
+struct_dmx_packet incomingDMXPacket;
+
+// ========== VARIABLES POUR L'ENVOI DE PAQUETS ESP-NOW ==========
+// Adresse broadcast pour envoyer des réponses
+uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}; 
 
 void OnDataSent(u8 *mac_addr, u8 status) {} // quand on utilise ESP_NOW, la fonction OnDataSent doit être déclarée mais, concrètement, on n'en a pas besoin (pour l'instant, aucune donnée n'est renvoyée par les récepteurs à l'émetteur)
+void OnDataRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len);
 
 // ========== FONCTIONNALITÉ OTA (MISE À JOUR FIRMWARE) ==========
 // Fonction encapsulée pour gérer la mise à jour OTA du firmware
@@ -337,6 +352,185 @@ void handleOTAUpdate(uint8_t* otaData) {
 }
 // ========== FIN FONCTIONNALITÉ OTA ==========
 
+// ========== FONCTIONNALITÉ DÉCOUVERTE MAC ==========
+// Fonction encapsulée pour envoyer l'adresse MAC de ce récepteur
+// En réponse à une demande REQUEST_MAC_CMD
+void sendMACResponse() {
+  Serial.println("========== ENVOI ADRESSE MAC ==========");
+  
+  // Préparation du paquet de réponse
+  struct_dmx_packet responsePacket;
+  
+  // Numéro de bloc = 255 pour indiquer que c'est un paquet de commande (pas de données DMX)
+  responsePacket.blockNumber = 255;
+  
+  // Effacer les données DMX (non utilisées pour ce type de paquet)
+  memset(responsePacket.dmxvalues, 0, sizeof(responsePacket.dmxvalues));
+  
+  // Effacer les données additionnelles
+  memset(responsePacket.data, 0, sizeof(responsePacket.data));
+  
+  // Signature pour valider le paquet
+  responsePacket.data[0] = SIGNATURE_A;
+  responsePacket.data[1] = SIGNATURE_B;
+  responsePacket.data[2] = SIGNATURE_C;
+  
+  // Code de commande de réponse MAC
+  responsePacket.data[3] = RESPONSE_MAC_CMD;
+  
+  // Récupération de l'adresse MAC de ce ESP8266
+  uint8_t macAddress[6];
+  WiFi.macAddress(macAddress);
+  
+  // Insertion de l'adresse MAC dans le paquet (6 bytes)
+  for (int i = 0; i < 6; i++) {
+    responsePacket.data[4 + i] = macAddress[i];
+  }
+  
+  // Informations supplémentaires utiles pour l'émetteur
+  responsePacket.data[10] = setupTubeNumber; // Numéro de groupe actuel
+  responsePacket.data[11] = VERSION;         // Version du firmware
+  
+  // Affichage de l'adresse MAC pour debug
+  Serial.print("Adresse MAC: ");
+  for (int i = 0; i < 6; i++) {
+    Serial.printf("%02X", macAddress[i]);
+    if (i < 5) Serial.print(":");
+  }
+  Serial.printf(" | Groupe: %d | Version: %d\n", setupTubeNumber, VERSION);
+  
+  // Indication visuelle : clignotement violet rapide
+  FastLED.clear();
+  for (int i = 0; i < 3; i++) {
+    for (int j = 0; j < min(5, MAXLEDLENGTH); j++) {
+      leds[j] = CRGB::Purple;
+    }
+    FastLED.show();
+    delay(100);
+    FastLED.clear();
+    FastLED.show();
+    delay(100);
+  }
+  
+  // Envoi du paquet en broadcast
+  uint8_t result = esp_now_send(broadcastAddress, (uint8_t *) &responsePacket, sizeof(responsePacket));
+  
+  if (result == 0) {
+    Serial.println("Adresse MAC envoyée avec succès");
+  } else {
+    Serial.printf("Erreur envoi MAC: %d\n", result);
+  }
+  
+  Serial.println("========== FIN ENVOI ADRESSE MAC ==========");
+}
+// ========== FIN FONCTIONNALITÉ DÉCOUVERTE MAC ==========
+
+// ========== FONCTIONNALITÉ SETUP À DISTANCE ==========
+
+// Fonction pour entrer en mode setup à distance
+void enterRemoteSetup() {
+  Serial.println("========== ENTRÉE SETUP À DISTANCE ==========");
+  remoteSetupMode = true;
+  lastBlinkTime = millis();
+  blinkState = false;
+  
+  // Indication visuelle d'entrée : clignotement jaune rapide
+  for (int i = 0; i < 5; i++) {
+    FastLED.clear();
+    for (int j = 0; j < min(10, MAXLEDLENGTH); j++) {
+      leds[j] = CRGB::Yellow;
+    }
+    FastLED.show();
+    delay(100);
+    FastLED.clear();
+    FastLED.show();
+    delay(100);
+  }
+  
+  Serial.printf("Mode setup à distance activé | Groupe actuel: %d\n", setupTubeNumber);
+}
+
+// Fonction pour sortir du mode setup à distance
+void exitRemoteSetup() {
+  Serial.println("========== SORTIE SETUP À DISTANCE ==========");
+  
+  // Sauvegarde du numéro de groupe en EEPROM
+  EEPROM.write(8, setupTubeNumber);
+  bool success = EEPROM.commit();
+  
+  Serial.printf("Sauvegarde groupe %d en EEPROM: %s\n", 
+                setupTubeNumber, 
+                success ? "OK" : "ERREUR");
+  
+  remoteSetupMode = false;
+  
+  // Indication visuelle de sortie : clignotement vert
+  for (int i = 0; i < 3; i++) {
+    FastLED.clear();
+    for (int j = 0; j < min(10, MAXLEDLENGTH); j++) {
+      leds[j] = CRGB::Green;
+    }
+    FastLED.show();
+    delay(200);
+    FastLED.clear();
+    FastLED.show();
+    delay(200);
+  }
+  
+  Serial.println("========== FIN SORTIE SETUP À DISTANCE ==========");
+}
+
+// Fonction pour définir un nouveau numéro de groupe
+void setGroupNumber(uint8_t newGroupNumber) {
+  if (newGroupNumber <= 31) { // Limite sécuritaire
+    setupTubeNumber = newGroupNumber;
+    Serial.printf("Nouveau groupe défini: %d\n", setupTubeNumber);
+    
+    // Reset du clignotement pour affichage immédiat
+    lastBlinkTime = millis();
+    blinkState = false;
+  } else {
+    Serial.printf("ERREUR: Numéro de groupe invalide: %d (max 31)\n", newGroupNumber);
+  }
+}
+
+// Fonction principale pour gérer l'affichage en mode setup à distance
+void handleRemoteSetup() {
+  // Gestion du clignotement (toutes les 200ms)
+  if (millis() - lastBlinkTime >= 200) {
+    lastBlinkTime = millis();
+    blinkState = !blinkState;
+  }
+  
+  // Effacer tout le strip
+  FastLED.clear();
+  
+  // LEDs 100+ en blanc pour signaler la sélection
+  for (int j = 100; j < MAXLEDLENGTH; j++) {
+    leds[j] = CRGB::White;
+  }
+  
+  // Affichage du numéro de groupe (seulement si clignotement actif)
+  if (blinkState) {
+    if (setupTubeNumber == 0) {
+      // Groupe 0 : première LED en rouge
+      if (0 < MAXLEDLENGTH) {
+        leds[0] = CRGB::Red;
+      }
+    } else {
+      // Groupe n : n LEDs vertes espacées de 10
+      for (int j = 0; j < setupTubeNumber && (j * 10) < min(100, MAXLEDLENGTH); j++) {
+        leds[j * 10] = CRGB::Green;
+      }
+    }
+  }
+  
+  // Afficher les LEDs
+  FastLED.show();
+}
+
+// ========== FIN FONCTIONNALITÉ SETUP À DISTANCE ==========
+
 // Callback when data is received
 // à chaque fois qu'un bloc de 128 valeurs est reçu par ESP_NOW, on met à jour ces valeurs dans le tableau dmxChannels
 void OnDataRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len)
@@ -351,7 +545,8 @@ void OnDataRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len)
         incomingDMXPacket.data[1] == SIGNATURE_B &&
         incomingDMXPacket.data[2] == SIGNATURE_C)
     {
-      // ========== GESTION COMMANDE OTA ==========
+      // ========== GESTION COMMANDES SPÉCIALES ==========
+      
       // Vérifier si c'est un paquet de commande OTA
       if (incomingDMXPacket.data[3] == OTA_UPDATE_CMD)
       {
@@ -359,7 +554,41 @@ void OnDataRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len)
         handleOTAUpdate(incomingDMXPacket.data);
         return; // Sortir immédiatement après traitement OTA
       }
-      // ========== FIN GESTION COMMANDE OTA ==========
+      
+      // Vérifier si c'est une demande d'adresse MAC
+      if (incomingDMXPacket.data[3] == REQUEST_MAC_CMD)
+      {
+        Serial.println("Demande d'adresse MAC détectée !");
+        sendMACResponse();
+        return; // Sortir immédiatement après envoi de la réponse
+      }
+      
+      // Vérifier si c'est une commande d'entrée en setup à distance
+      if (incomingDMXPacket.data[3] == ENTER_REMOTE_SETUP_CMD)
+      {
+        Serial.println("Commande ENTER_REMOTE_SETUP détectée !");
+        enterRemoteSetup();
+        return; // Sortir immédiatement après traitement
+      }
+      
+      // Vérifier si c'est une commande de sortie du setup à distance
+      if (incomingDMXPacket.data[3] == EXIT_REMOTE_SETUP_CMD)
+      {
+        Serial.println("Commande EXIT_REMOTE_SETUP détectée !");
+        exitRemoteSetup();
+        return; // Sortir immédiatement après traitement
+      }
+      
+      // Vérifier si c'est une commande de définition de groupe
+      if (incomingDMXPacket.data[3] == SET_GROUP_NUMBER_CMD)
+      {
+        uint8_t newGroup = incomingDMXPacket.data[4];
+        Serial.printf("Commande SET_GROUP_NUMBER détectée : %d\n", newGroup);
+        setGroupNumber(newGroup);
+        return; // Sortir immédiatement après traitement
+      }
+      
+      // ========== FIN GESTION COMMANDES SPÉCIALES ==========
 
       // Traitement normal des paquets DMX (si data[3] != OTA_UPDATE_CMD)
       uint8_t packetNumber = incomingDMXPacket.blockNumber;
@@ -990,6 +1219,11 @@ void setup()
 
   esp_now_register_recv_cb(OnDataRecv);
 
+  // ========== CONFIGURATION ESP-NOW POUR LES ENVOIS ==========
+  // Ajouter l'adresse broadcast comme peer pour pouvoir envoyer des réponses
+  esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_COMBO, 1, NULL, 0);
+  Serial.println("Adresse broadcast ajoutée comme peer ESP-NOW");
+
   // link the button 1 functions.
   button1.setDebounceMs(50);
   button1.setPressMs(1000); 
@@ -1022,6 +1256,14 @@ void setup()
 void loop() 
 {
   button1.tick(); // fonction vérifiant l'état du bouton
+
+  // ========== PRIORITÉ AU SETUP À DISTANCE ==========
+  if (remoteSetupMode) {
+    handleRemoteSetup(); // Gestion du setup à distance
+    delay(1); // Petit délai pour éviter la surcharge
+    return; // Sortir immédiatement, ignorer le reste de la loop
+  }
+  // ========== FIN PRIORITÉ SETUP À DISTANCE ==========
 
   if (etat == RUNNING)
   {
