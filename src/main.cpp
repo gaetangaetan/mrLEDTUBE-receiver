@@ -813,6 +813,7 @@ Color convertToColor(uint8_t index)
 }
 
 
+
 void flickering(uint8_t dmx1, uint8_t dmx2, uint8_t dmx3, uint8_t dmx4, uint8_t dmx5, uint8_t dmx6, uint8_t dmx7, uint8_t dmx8,uint8_t dmx9,uint8_t dmx10)
 {
   // "grésillement lumineux"
