@@ -88,6 +88,7 @@ Le numéro de groupe est enregistré en EEPROM
 #define ENTER_REMOTE_SETUP_CMD 0xFD // Code de commande pour entrer en setup à distance
 #define EXIT_REMOTE_SETUP_CMD 0xFE // Code de commande pour sortir du setup à distance
 #define SET_GROUP_NUMBER_CMD 0xFF // Code de commande pour définir le numéro de groupe
+#define PANIC_RESTART_CMD 0xF9 // Code de commande pour redémarrer tous les récepteurs
 
 #include <Arduino.h>
 #include <EEPROM.h>
@@ -101,10 +102,24 @@ Le numéro de groupe est enregistré en EEPROM
 // #include <ESP8266WebServer.h>
 // #include <WiFiManager.h> 
 // WiFiManager wifiManager;
-#define APNAME "mrLEDTUBE16"
-#define VERSION 16 // numéro de version pour m'y retrouver pendant le développement
+#define APNAME "mrLEDTUBE19"
+#define VERSION 19 // numéro de version pour m'y retrouver pendant le développement
 
-#define EEPROM_SIZE 32
+#define EEPROM_SIZE 128  // Augmenté pour stocker les paramètres OTA (structure ~100 bytes)
+
+// Paramètres OTA stockés directement en EEPROM (approche simple)
+// Layout EEPROM à partir de l'adresse EEPROM_ADDR_OTA_PARAMS (12) :
+// +0: pending (1 byte)
+// +1: ssidLength (1 byte) 
+// +2: passwordLength (1 byte)
+// +3 à +34: SSID (32 bytes max)
+// +35 à +97: Password (63 bytes max)
+
+// Adresses EEPROM
+#define EEPROM_ADDR_SETUP_ADDRESS   0
+#define EEPROM_ADDR_SETUP_MODE      4  
+#define EEPROM_ADDR_SETUP_TUBE      8
+#define EEPROM_ADDR_OTA_PARAMS      12
 
 #include <FastLED.h>
 
@@ -177,23 +192,134 @@ struct_dmx_packet incomingDMXPacket;
 // Adresse broadcast pour envoyer des réponses
 uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}; 
 
+// Variable pour stocker l'adresse MAC de l'émetteur (pour répondre directement)
+uint8_t senderMacAddress[6];
+bool hasSenderAddress = false;
+
+// Variables pour le mode configuration à distance
+bool remoteConfigActive = false;      // true si en mode configuration à distance
+unsigned long lastConfigBlink = 0;   // Dernier clignotement en mode config
+bool configBlinkState = false;       // État du clignotement (true = allumé)
+
 void OnDataSent(u8 *mac_addr, u8 status) {} // quand on utilise ESP_NOW, la fonction OnDataSent doit être déclarée mais, concrètement, on n'en a pas besoin (pour l'instant, aucune donnée n'est renvoyée par les récepteurs à l'émetteur)
 void OnDataRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len);
 
+// Fonction pour vérifier si une commande est destinée à ce récepteur
+bool isCommandForMe(const uint8_t* commandData) {
+  // Récupérer notre adresse MAC
+  uint8_t myMacAddress[6];
+  WiFi.macAddress(myMacAddress);
+  
+  // Comparer avec l'adresse MAC dans commandData[4..9]
+  return memcmp(&commandData[4], myMacAddress, 6) == 0;
+}
+
+// Fonction pour afficher le pattern de configuration à distance
+void displayRemoteConfigPattern() {
+  unsigned long currentTime = millis();
+  
+  // Clignotement toutes les 500ms
+  if (currentTime - lastConfigBlink >= 500) {
+    configBlinkState = !configBlinkState;
+    lastConfigBlink = currentTime;
+    
+    FastLED.clear();
+    
+    if (configBlinkState) {
+      // État allumé : pattern rouge/blanc alternant toutes les 10 LEDs
+      // LEDs 0-9 blancs, 10-19 rouges, 20-29 blancs, 30-39 rouges, etc.
+      
+      for (int i = 0; i < MAXLEDLENGTH; i++) {
+        int group = i / 10; // Groupe de 10 LEDs (0, 1, 2, 3...)
+        if (group % 2 == 0) {
+          leds[i] = CRGB::White; // Groupes pairs : blanc
+        } else {
+          leds[i] = CRGB::Red;   // Groupes impairs : rouge
+        }
+      }
+    }
+    // État éteint : rien à faire (FastLED.clear() déjà appelé)
+    
+    FastLED.show();
+  }
+}
+
 // ========== FONCTIONNALITÉ OTA (MISE À JOUR FIRMWARE) ==========
-// Fonction encapsulée pour gérer la mise à jour OTA du firmware
+
+// Fonctions utilitaires pour la gestion des paramètres OTA en EEPROM (approche simple)
+void saveOTAParams(const char* ssid, const char* password) {
+  uint8_t ssidLen = strlen(ssid);
+  uint8_t passLen = strlen(password);
+  
+  // Sauvegarde directe octet par octet
+  EEPROM.write(EEPROM_ADDR_OTA_PARAMS, 1);      // pending = 1
+  EEPROM.write(EEPROM_ADDR_OTA_PARAMS + 1, ssidLen);
+  EEPROM.write(EEPROM_ADDR_OTA_PARAMS + 2, passLen);
+  
+  // Sauvegarde SSID
+  for (int i = 0; i < ssidLen && i < 32; i++) {
+    EEPROM.write(EEPROM_ADDR_OTA_PARAMS + 3 + i, ssid[i]);
+  }
+  
+  // Sauvegarde Password
+  for (int i = 0; i < passLen && i < 63; i++) {
+    EEPROM.write(EEPROM_ADDR_OTA_PARAMS + 35 + i, password[i]);
+  }
+  
+  EEPROM.commit();
+  Serial.println("Paramètres OTA sauvegardés en EEPROM");
+}
+
+bool loadOTAParams(char* ssid, char* password) {
+  Serial.println("DEBUG: loadOTAParams() appelée");
+  
+  uint8_t pending = EEPROM.read(EEPROM_ADDR_OTA_PARAMS);
+  Serial.printf("DEBUG: pending = %d\n", pending);
+  
+  if (pending != 1) {
+    Serial.println("DEBUG: OTA pas en attente (pending != 1)");
+    return false; // Pas d'OTA en attente
+  }
+  
+  uint8_t ssidLen = EEPROM.read(EEPROM_ADDR_OTA_PARAMS + 1);
+  uint8_t passLen = EEPROM.read(EEPROM_ADDR_OTA_PARAMS + 2);
+  
+  Serial.printf("DEBUG: SSID length = %d, Password length = %d\n", ssidLen, passLen);
+  
+  // Lecture SSID
+  for (int i = 0; i < ssidLen && i < 32; i++) {
+    ssid[i] = EEPROM.read(EEPROM_ADDR_OTA_PARAMS + 3 + i);
+  }
+  ssid[ssidLen] = '\0';
+  
+  // Lecture Password
+  for (int i = 0; i < passLen && i < 63; i++) {
+    password[i] = EEPROM.read(EEPROM_ADDR_OTA_PARAMS + 35 + i);
+  }
+  password[passLen] = '\0';
+  
+  Serial.printf("DEBUG: SSID lu = '%s'\n", ssid);
+  
+  return true;
+}
+
+void clearOTAParams() {
+  EEPROM.write(EEPROM_ADDR_OTA_PARAMS, 0);  // pending = 0
+  EEPROM.commit();
+  Serial.println("Paramètres OTA effacés de l'EEPROM");
+}
+// Fonction simplifiée pour programmer une mise à jour OTA
+// Sauvegarde les paramètres en EEPROM et redémarre
 // Paramètres extraits du paquet ESP-NOW selon le format :
 // data[4] = longueur SSID, data[5...] = SSID, data[X] = longueur password, data[X+1...] = password
 void handleOTAUpdate(uint8_t* otaData) {
-  Serial.println("========== DÉBUT MISE À JOUR OTA ==========");
-  
-  // URL fixe du firmware
-  const char* firmwareURL = "https://mrledtubefirmware.gaetanstreel.com/firmware.bin";
+  Serial.println("========== PROGRAMMATION MISE À JOUR OTA ==========");
   
   // Extraction des informations WiFi depuis le paquet
   uint8_t ssidLength = otaData[4];
+  
   if (ssidLength == 0 || ssidLength > 32) {
-    Serial.println("ERREUR: Longueur SSID invalide");
+    Serial.printf("ERREUR: Longueur SSID invalide (%d)\n", ssidLength);
     return;
   }
   
@@ -204,8 +330,9 @@ void handleOTAUpdate(uint8_t* otaData) {
   
   // Extraction de la longueur du password
   uint8_t passwordLength = otaData[5 + ssidLength];
+  
   if (passwordLength > 63) { // WPA2 limite à 63 caractères
-    Serial.println("ERREUR: Longueur password invalide");
+    Serial.printf("ERREUR: Longueur password invalide (%d)\n", passwordLength);
     return;
   }
   
@@ -216,12 +343,45 @@ void handleOTAUpdate(uint8_t* otaData) {
   }
   password[passwordLength] = '\0';
   
-  Serial.print("Connexion au WiFi: ");
-  Serial.print(ssid);
-  Serial.print(" / ");
-  Serial.println(passwordLength > 0 ? "****" : "(pas de mot de passe)");
+  Serial.printf("OTA programmée avec WiFi: %s\n", ssid);
   
-  // Indication visuelle : clignotement bleu pendant la connexion WiFi
+  // Sauvegarde des paramètres et redémarrage
+  saveOTAParams(ssid, password);
+  Serial.println("Redémarrage pour mise à jour OTA...");
+  
+  // Délai plus long et flush du Serial avant redémarrage
+  Serial.flush();
+  delay(1000);
+  
+  // Redémarrage propre
+  ESP.restart();
+}
+
+// Fonction pour exécuter la mise à jour OTA au démarrage
+void executeOTAUpdate() {
+  Serial.println("DEBUG: executeOTAUpdate() appelée");
+  
+  char ssid[33];
+  char password[64];
+  
+  if (!loadOTAParams(ssid, password)) {
+    Serial.println("DEBUG: Pas d'OTA en attente");
+    return; // Pas d'OTA en attente
+  }
+  
+  Serial.println("DEBUG: OTA en attente trouvée !");
+  
+  Serial.println("========== EXÉCUTION MISE À JOUR OTA ==========");
+  Serial.printf("Connexion au WiFi: %s\n", ssid);
+  
+  // IMPORTANT: Effacer les paramètres OTA AVANT le téléchargement
+  // pour éviter la boucle infinie en cas de succès
+  clearOTAParams();
+  
+  // URL fixe du firmware
+  const char* firmwareURL = "http://mrledtubefirmware.gaetanstreel.com/firmware.bin";
+  
+  // Clignotement bleu pendant la connexion WiFi
   FastLED.clear();
   for (int i = 0; i < 5; i++) {
     for (int j = 0; j < min(10, MAXLEDLENGTH); j++) {
@@ -235,7 +395,6 @@ void handleOTAUpdate(uint8_t* otaData) {
   }
   
   // Connexion au WiFi
-  WiFi.disconnect();
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   
@@ -268,11 +427,10 @@ void handleOTAUpdate(uint8_t* otaData) {
       delay(100);
     }
     
-    // Retour au mode ESP-NOW
-    WiFi.disconnect();
-    WiFi.mode(WIFI_STA);
-    esp_now_init();
-    esp_now_register_recv_cb(OnDataRecv);
+    // Redémarrage en mode normal (paramètres déjà effacés)
+    Serial.println("Redémarrage en mode normal...");
+    delay(1000);
+    ESP.restart();
     return;
   }
   
@@ -337,16 +495,16 @@ void handleOTAUpdate(uint8_t* otaData) {
       FastLED.show();
       delay(1000);
       
-      ESP.restart(); // Le redémarrage ne sera jamais atteint car l'OTA redémarre déjà
+      // Paramètres déjà effacés, redémarrage automatique par OTA
+      ESP.restart();
       break;
   }
   
   // Si on arrive ici, c'est qu'il y a eu une erreur ou aucune mise à jour
-  // Retour au mode ESP-NOW
-  WiFi.disconnect();
-  WiFi.mode(WIFI_STA);
-  esp_now_init();
-  esp_now_register_recv_cb(OnDataRecv);
+  // Paramètres déjà effacés, redémarrage en mode normal
+  Serial.println("Redémarrage en mode normal...");
+  delay(1000);
+  ESP.restart();
   
   Serial.println("========== FIN MISE À JOUR OTA ==========");
 }
@@ -399,24 +557,37 @@ void sendMACResponse() {
   }
   Serial.printf(" | Groupe: %d | Version: %d\n", setupTubeNumber, VERSION);
   
-  // Indication visuelle : clignotement violet rapide
-  FastLED.clear();
-  for (int i = 0; i < 3; i++) {
-    for (int j = 0; j < min(5, MAXLEDLENGTH); j++) {
-      leds[j] = CRGB::Purple;
+  // Envoyer directement à l'émetteur si on a son adresse MAC
+  uint8_t* targetAddress;
+  if (hasSenderAddress) {
+    // Vérifier d'abord si le peer existe déjà (évite l'erreur -8)
+    if (!esp_now_is_peer_exist(senderMacAddress)) {
+      // Ajouter l'émetteur comme peer pour pouvoir lui répondre directement
+      int peerResult = esp_now_add_peer(senderMacAddress, ESP_NOW_ROLE_COMBO, 1, NULL, 0);
+      if (peerResult != 0) {
+        Serial.printf("Erreur ajout peer émetteur: %d\n", peerResult);
+        // En cas d'erreur, fallback sur broadcast
+        targetAddress = broadcastAddress;
+        Serial.println("Fallback: envoi en broadcast");
+      } else {
+        targetAddress = senderMacAddress;
+        Serial.println("Peer ajouté, envoi direct à l'émetteur");
+      }
+    } else {
+      targetAddress = senderMacAddress;
+      Serial.println("Peer existe déjà, envoi direct à l'émetteur");
     }
-    FastLED.show();
-    delay(100);
-    FastLED.clear();
-    FastLED.show();
-    delay(100);
+  } else {
+    targetAddress = broadcastAddress;
+    Serial.println("Envoi en broadcast");
   }
   
-  // Envoi du paquet en broadcast
-  uint8_t result = esp_now_send(broadcastAddress, (uint8_t *) &responsePacket, sizeof(responsePacket));
+  // Envoi du paquet AVANT l'indication visuelle
+  uint8_t result = esp_now_send(targetAddress, (uint8_t *) &responsePacket, sizeof(responsePacket));
   
   if (result == 0) {
     Serial.println("Adresse MAC envoyée avec succès");
+    // Note: Indication visuelle supprimée pour éviter les conflits FastLED/ESP-NOW
   } else {
     Serial.printf("Erreur envoi MAC: %d\n", result);
   }
@@ -430,53 +601,35 @@ void sendMACResponse() {
 // Fonction pour entrer en mode setup à distance
 void enterRemoteSetup() {
   Serial.println("========== ENTRÉE SETUP À DISTANCE ==========");
-  remoteSetupMode = true;
-  lastBlinkTime = millis();
-  blinkState = false;
+  Serial.println("DEBUG: Début enterRemoteSetup");
   
-  // Indication visuelle d'entrée : clignotement jaune rapide
-  for (int i = 0; i < 5; i++) {
-    FastLED.clear();
-    for (int j = 0; j < min(10, MAXLEDLENGTH); j++) {
-      leds[j] = CRGB::Yellow;
-    }
-    FastLED.show();
-    delay(100);
-    FastLED.clear();
-    FastLED.show();
-    delay(100);
-  }
+  // Test minimal - juste les variables essentielles
+  lastConfigBlink = millis();
+  configBlinkState = false;
   
+  Serial.println("DEBUG: Variables initialisées");
   Serial.printf("Mode setup à distance activé | Groupe actuel: %d\n", setupTubeNumber);
+  Serial.println("DEBUG: Fin enterRemoteSetup");
 }
 
 // Fonction pour sortir du mode setup à distance
 void exitRemoteSetup() {
   Serial.println("========== SORTIE SETUP À DISTANCE ==========");
+  Serial.println("DEBUG: Début exitRemoteSetup");
   
   // Sauvegarde du numéro de groupe en EEPROM
-  EEPROM.write(8, setupTubeNumber);
+  Serial.println("DEBUG: Avant EEPROM.write");
+  EEPROM.write(EEPROM_ADDR_SETUP_TUBE, setupTubeNumber);
+  Serial.println("DEBUG: Avant EEPROM.commit");
   bool success = EEPROM.commit();
+  Serial.println("DEBUG: Après EEPROM.commit");
   
   Serial.printf("Sauvegarde groupe %d en EEPROM: %s\n", 
                 setupTubeNumber, 
                 success ? "OK" : "ERREUR");
   
-  remoteSetupMode = false;
-  
-  // Indication visuelle de sortie : clignotement vert
-  for (int i = 0; i < 3; i++) {
-    FastLED.clear();
-    for (int j = 0; j < min(10, MAXLEDLENGTH); j++) {
-      leds[j] = CRGB::Green;
-    }
-    FastLED.show();
-    delay(200);
-    FastLED.clear();
-    FastLED.show();
-    delay(200);
-  }
-  
+  // Note: remoteConfigActive est déjà désactivé dans OnDataRecv avant l'appel de cette fonction
+  Serial.println("DEBUG: Fin exitRemoteSetup");
   Serial.println("========== FIN SORTIE SETUP À DISTANCE ==========");
 }
 
@@ -559,36 +712,57 @@ void OnDataRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len)
       if (incomingDMXPacket.data[3] == REQUEST_MAC_CMD)
       {
         Serial.println("Demande d'adresse MAC détectée !");
+        
+        // Stocker l'adresse MAC de l'émetteur pour pouvoir lui répondre directement
+        memcpy(senderMacAddress, mac, 6);
+        hasSenderAddress = true;
+        
         sendMACResponse();
         return; // Sortir immédiatement après envoi de la réponse
       }
       
       // Vérifier si c'est une commande d'entrée en setup à distance
-      if (incomingDMXPacket.data[3] == ENTER_REMOTE_SETUP_CMD)
+      if (incomingDMXPacket.data[3] == ENTER_REMOTE_SETUP_CMD && isCommandForMe(incomingDMXPacket.data))
       {
-        Serial.println("Commande ENTER_REMOTE_SETUP détectée !");
+        Serial.println("Commande ENTER_REMOTE_SETUP détectée pour moi !");
+        remoteConfigActive = true;
         enterRemoteSetup();
         return; // Sortir immédiatement après traitement
       }
       
       // Vérifier si c'est une commande de sortie du setup à distance
-      if (incomingDMXPacket.data[3] == EXIT_REMOTE_SETUP_CMD)
+      if (incomingDMXPacket.data[3] == EXIT_REMOTE_SETUP_CMD && isCommandForMe(incomingDMXPacket.data))
       {
-        Serial.println("Commande EXIT_REMOTE_SETUP détectée !");
+        Serial.println("Commande EXIT_REMOTE_SETUP détectée pour moi !");
+        remoteConfigActive = false;
         exitRemoteSetup();
         return; // Sortir immédiatement après traitement
       }
       
       // Vérifier si c'est une commande de définition de groupe
-      if (incomingDMXPacket.data[3] == SET_GROUP_NUMBER_CMD)
+      if (incomingDMXPacket.data[3] == SET_GROUP_NUMBER_CMD && isCommandForMe(incomingDMXPacket.data))
       {
-        uint8_t newGroup = incomingDMXPacket.data[4];
+        uint8_t newGroup = incomingDMXPacket.data[10]; // Le groupe est maintenant en position 10
         Serial.printf("Commande SET_GROUP_NUMBER détectée : %d\n", newGroup);
         setGroupNumber(newGroup);
         return; // Sortir immédiatement après traitement
       }
       
+      // Vérifier si c'est une commande PANIC RESTART
+      if (incomingDMXPacket.data[3] == PANIC_RESTART_CMD)
+      {
+        Serial.println("Commande PANIC_RESTART détectée ! Redémarrage immédiat...");
+        delay(100); // Petit délai pour que le message s'affiche
+        ESP.restart(); // Redémarrage immédiat
+        return;
+      }
+      
       // ========== FIN GESTION COMMANDES SPÉCIALES ==========
+
+      // IGNORER les paquets DMX normaux si en mode configuration à distance
+      if (remoteConfigActive) {
+        return; // Ne pas traiter les données DMX pendant la configuration
+      }
 
       // Traitement normal des paquets DMX (si data[3] != OTA_UPDATE_CMD)
       uint8_t packetNumber = incomingDMXPacket.blockNumber;
@@ -1177,9 +1351,9 @@ void longPressStart1() // un clic long, permet de passer de RUNNING à SETUP et 
 
   if (etat == SETUP) // avant de sortir du SETUP, on enregistre les données en mémoire persistante
   {
-    EEPROM.write(0, setupAddress);
-    EEPROM.write(4, setupMode);
-    EEPROM.write(8, setupTubeNumber);
+    EEPROM.write(EEPROM_ADDR_SETUP_ADDRESS, setupAddress);
+    EEPROM.write(EEPROM_ADDR_SETUP_MODE, setupMode);
+    EEPROM.write(EEPROM_ADDR_SETUP_TUBE, setupTubeNumber);
     Serial.print("Commit =  ");
     Serial.println(EEPROM.commit());
   }
@@ -1200,6 +1374,13 @@ void setup()
 
   FastLED.addLeds<WS2812, DATA_PIN, GRB>(leds, MAXLEDLENGTH); // Création d'un objet représentant le ledstrip pour FastLED // GRB ordering is typical
 
+  // Initialiser EEPROM avant tout
+  EEPROM.begin(EEPROM_SIZE);
+  
+  // Vérifier et exécuter une mise à jour OTA en attente AVANT d'initialiser ESP-NOW
+  executeOTAUpdate();
+  
+  // Si on arrive ici, pas d'OTA en attente, continuer normalement
   WiFi.disconnect();
   ESP.eraseConfig(); // !!! COMMANDES IMPORTANTES !!! ESP_NOW peut parfois ne pas fonctionner si on n'exécute pas pas ces deux commandes. Je ne suis pas sûr que ce soit écrit dans la doc. C'est peut-être même un petit bug. Bref, il faut le savoir :)
 
@@ -1220,9 +1401,17 @@ void setup()
   esp_now_register_recv_cb(OnDataRecv);
 
   // ========== CONFIGURATION ESP-NOW POUR LES ENVOIS ==========
+  // Définir le rôle ESP-NOW (nécessaire avant d'ajouter des peers)
+  esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
+  
   // Ajouter l'adresse broadcast comme peer pour pouvoir envoyer des réponses
-  esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_COMBO, 1, NULL, 0);
-  Serial.println("Adresse broadcast ajoutée comme peer ESP-NOW");
+  // API ESP8266 (espnow.h) : esp_now_add_peer(mac, role, channel, key, key_len)
+  int result = esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_COMBO, 1, NULL, 0);
+  if (result != 0) {
+    Serial.printf("Erreur lors de l'ajout du peer broadcast: %d\n", result);
+  } else {
+    Serial.println("Adresse broadcast ajoutée comme peer ESP-NOW");
+  }
 
   // link the button 1 functions.
   button1.setDebounceMs(50);
@@ -1230,11 +1419,10 @@ void setup()
   button1.attachClick(click1);
   button1.attachLongPressStart(longPressStart1);
 
-  EEPROM.begin(EEPROM_SIZE);
-
-  setupAddress = EEPROM.read(0);
-  setupMode = EEPROM.read(4);
-  setupTubeNumber = EEPROM.read(8);
+  // EEPROM déjà initialisé plus haut
+  setupAddress = EEPROM.read(EEPROM_ADDR_SETUP_ADDRESS);
+  setupMode = EEPROM.read(EEPROM_ADDR_SETUP_MODE);
+  setupTubeNumber = EEPROM.read(EEPROM_ADDR_SETUP_TUBE);
   if ((setupAddress < 1) || (setupAddress > 512))
     setupAddress = 1;
   if ((setupMode < 1) || (setupMode > 255))
@@ -1264,6 +1452,14 @@ void loop()
     return; // Sortir immédiatement, ignorer le reste de la loop
   }
   // ========== FIN PRIORITÉ SETUP À DISTANCE ==========
+
+  // ========== MODE CONFIGURATION À DISTANCE ==========
+  if (remoteConfigActive) {
+    displayRemoteConfigPattern(); // Affichage spécial clignotant
+    delay(1); // Petit délai pour éviter la surcharge
+    return; // Sortir immédiatement, ignorer le DMX
+  }
+  // ========== FIN MODE CONFIGURATION À DISTANCE ==========
 
   if (etat == RUNNING)
   {
