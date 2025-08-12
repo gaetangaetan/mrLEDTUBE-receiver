@@ -1,5 +1,6 @@
 #define VERSION 21 // numéro de version pour m'y retrouver pendant le développement
 #define VERSION_DATE "2025-08-12" // date de la version
+#define BUTTON_PRESENT false
 /*
 
 Ce code fait partie d'un système de contrôle DMX sans fil pour ledstrip.
@@ -1342,6 +1343,7 @@ break;
 // ----- button 1 callback functions
 void click1() // en mode SETUP, chaque clic simple sur le bouton incrémente le numéro de groupe
 {
+  if(!BUTTON_PRESENT) return;
   if (etat == RUNNING)
     return; // en mode RUNNING, on ignore cette action
   setupTubeNumber = (setupTubeNumber + 1) % NBGROUPS;
@@ -1349,6 +1351,8 @@ void click1() // en mode SETUP, chaque clic simple sur le bouton incrémente le 
 
 void longPressStart1() // un clic long, permet de passer de RUNNING à SETUP et inversement (à la sortie du mode SETUP, on enregistre les données en mémoire persistante)
 {
+  if(!BUTTON_PRESENT) return;
+
   Serial.print("longpress | etat = ");
   Serial.println((etat ? "RUNNING" : "SETUP"));
 
@@ -1448,7 +1452,7 @@ void setup()
 
 void loop() 
 {
-  button1.tick(); // fonction vérifiant l'état du bouton
+  if(BUTTON_PRESENT) button1.tick(); // fonction vérifiant l'état du bouton
 
   // ========== PRIORITÉ AU SETUP À DISTANCE ==========
   if (remoteSetupMode) {
