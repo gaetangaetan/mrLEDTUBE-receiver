@@ -1,3 +1,5 @@
+#define VERSION 21 // numéro de version pour m'y retrouver pendant le développement
+#define VERSION_DATE "2025-08-12" // date de la version
 /*
 
 Ce code fait partie d'un système de contrôle DMX sans fil pour ledstrip.
@@ -103,7 +105,7 @@ Le numéro de groupe est enregistré en EEPROM
 // #include <WiFiManager.h> 
 // WiFiManager wifiManager;
 #define APNAME "mrLEDTUBE19"
-#define VERSION 19 // numéro de version pour m'y retrouver pendant le développement
+
 
 #define EEPROM_SIZE 128  // Augmenté pour stocker les paramètres OTA (structure ~100 bytes)
 
@@ -271,20 +273,20 @@ void saveOTAParams(const char* ssid, const char* password) {
 }
 
 bool loadOTAParams(char* ssid, char* password) {
-  Serial.println("DEBUG: loadOTAParams() appelée");
+  //Serial.println("DEBUG: loadOTAParams() appelée");
   
   uint8_t pending = EEPROM.read(EEPROM_ADDR_OTA_PARAMS);
-  Serial.printf("DEBUG: pending = %d\n", pending);
+  //Serial.printf("DEBUG: pending = %d\n", pending);
   
   if (pending != 1) {
-    Serial.println("DEBUG: OTA pas en attente (pending != 1)");
+    //Serial.println("DEBUG: OTA pas en attente (pending != 1)");
     return false; // Pas d'OTA en attente
   }
   
   uint8_t ssidLen = EEPROM.read(EEPROM_ADDR_OTA_PARAMS + 1);
   uint8_t passLen = EEPROM.read(EEPROM_ADDR_OTA_PARAMS + 2);
   
-  Serial.printf("DEBUG: SSID length = %d, Password length = %d\n", ssidLen, passLen);
+  //Serial.printf("DEBUG: SSID length = %d, Password length = %d\n", ssidLen, passLen);
   
   // Lecture SSID
   for (int i = 0; i < ssidLen && i < 32; i++) {
@@ -298,7 +300,7 @@ bool loadOTAParams(char* ssid, char* password) {
   }
   password[passLen] = '\0';
   
-  Serial.printf("DEBUG: SSID lu = '%s'\n", ssid);
+  //Serial.printf("DEBUG: SSID lu = '%s'\n", ssid);
   
   return true;
 }
@@ -359,17 +361,17 @@ void handleOTAUpdate(uint8_t* otaData) {
 
 // Fonction pour exécuter la mise à jour OTA au démarrage
 void executeOTAUpdate() {
-  Serial.println("DEBUG: executeOTAUpdate() appelée");
+  //Serial.println("DEBUG: executeOTAUpdate() appelée");
   
   char ssid[33];
   char password[64];
   
   if (!loadOTAParams(ssid, password)) {
-    Serial.println("DEBUG: Pas d'OTA en attente");
+    //Serial.println("DEBUG: Pas d'OTA en attente");
     return; // Pas d'OTA en attente
   }
   
-  Serial.println("DEBUG: OTA en attente trouvée !");
+  //Serial.println("DEBUG: OTA en attente trouvée !");
   
   Serial.println("========== EXÉCUTION MISE À JOUR OTA ==========");
   Serial.printf("Connexion au WiFi: %s\n", ssid);
@@ -601,35 +603,35 @@ void sendMACResponse() {
 // Fonction pour entrer en mode setup à distance
 void enterRemoteSetup() {
   Serial.println("========== ENTRÉE SETUP À DISTANCE ==========");
-  Serial.println("DEBUG: Début enterRemoteSetup");
+  //Serial.println("DEBUG: Début enterRemoteSetup");
   
   // Test minimal - juste les variables essentielles
   lastConfigBlink = millis();
   configBlinkState = false;
   
-  Serial.println("DEBUG: Variables initialisées");
+  //Serial.println("DEBUG: Variables initialisées");
   Serial.printf("Mode setup à distance activé | Groupe actuel: %d\n", setupTubeNumber);
-  Serial.println("DEBUG: Fin enterRemoteSetup");
+  //Serial.println("DEBUG: Fin enterRemoteSetup");
 }
 
 // Fonction pour sortir du mode setup à distance
 void exitRemoteSetup() {
   Serial.println("========== SORTIE SETUP À DISTANCE ==========");
-  Serial.println("DEBUG: Début exitRemoteSetup");
+  //Serial.println("DEBUG: Début exitRemoteSetup");
   
   // Sauvegarde du numéro de groupe en EEPROM
-  Serial.println("DEBUG: Avant EEPROM.write");
+  //Serial.println("DEBUG: Avant EEPROM.write");
   EEPROM.write(EEPROM_ADDR_SETUP_TUBE, setupTubeNumber);
-  Serial.println("DEBUG: Avant EEPROM.commit");
+  //Serial.println("DEBUG: Avant EEPROM.commit");
   bool success = EEPROM.commit();
-  Serial.println("DEBUG: Après EEPROM.commit");
+  //Serial.println("DEBUG: Après EEPROM.commit");
   
   Serial.printf("Sauvegarde groupe %d en EEPROM: %s\n", 
                 setupTubeNumber, 
                 success ? "OK" : "ERREUR");
   
   // Note: remoteConfigActive est déjà désactivé dans OnDataRecv avant l'appel de cette fonction
-  Serial.println("DEBUG: Fin exitRemoteSetup");
+  //Serial.println("DEBUG: Fin exitRemoteSetup");
   Serial.println("========== FIN SORTIE SETUP À DISTANCE ==========");
 }
 
@@ -1368,7 +1370,9 @@ void setup()
   Serial.begin(115200);
   Serial.println("");
   Serial.print("Version ");
-  Serial.println(VERSION);
+  Serial.print(VERSION);
+  Serial.print(" | ");
+  Serial.println(VERSION_DATE);
 
   pinMode(BUTTONGROUNDPIN, OUTPUT); 
   digitalWrite(BUTTONGROUNDPIN, LOW); // on utilise BUTTONGROUNDPIN comme GND pour le bouton 1
