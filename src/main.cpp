@@ -61,6 +61,7 @@ Un certain nombre de LEDS correspondant au numéro de groupe clignotent en vert 
 Le numéro de groupe est enregistré en EEPROM
 */
 
+
 #define DATA_PIN D2        // pin de contrôle du strip led
 #define BUTTONPIN D1       // on définit le pin positif du bouton (il s'agit d'un pullup, quand le bouton est relevé, la valeur du pin est HIGH, quand le bouton est enfoncé, le contact au GND est fait et la valeur est donc LOW)
 #define BUTTONGROUNDPIN D5 // pour faciliter le montage, on utilise une pin pour fournir le GND au bouton
