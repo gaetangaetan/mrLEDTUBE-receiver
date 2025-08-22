@@ -6,6 +6,14 @@
 		{
 			"name": "mrLEDTUBE-receiver",
 			"path": ".."
+		},
+		{
+			"name": "poulpylights_minimal_emitter_ESP8266",
+			"path": "C:/Users/mrpoulpy/Documents/PlatformIO/Projects/poulpylights_minimal_emitter_ESP8266"
+		},
+		{
+			"name": "ONIRIGUN juillet 2025",
+			"path": "C:/Users/mrpoulpy/Documents/PlatformIO/Projects/ONIRIGUN juillet 2025"
 		}
 	],
 	"settings": {}
