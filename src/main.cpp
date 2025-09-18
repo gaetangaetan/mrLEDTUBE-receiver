@@ -66,7 +66,7 @@ Le numéro de groupe est enregistré en EEPROM
 #define BUTTONPIN D1       // on définit le pin positif du bouton (il s'agit d'un pullup, quand le bouton est relevé, la valeur du pin est HIGH, quand le bouton est enfoncé, le contact au GND est fait et la valeur est donc LOW)
 #define BUTTONGROUNDPIN D5 // pour faciliter le montage, on utilise une pin pour fournir le GND au bouton
 
-#define MAXLEDLENGTH 144  // longueur du strip led 
+#define MAXLEDLENGTH 288  // longueur du strip led attention! version 2m de longueur!! remettre à 144 pour la version 1m
                           
                           // !!!  QUAND LE STRIP LED EST ALIMENTÉ PAR L'ESP (en cours de programmation, par exemple), NE PAS ALLUMER PLUS D'UNE DIZAINE DE LEDS !!!
                           
