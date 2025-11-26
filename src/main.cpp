@@ -457,6 +457,8 @@ int scanWiFiForChannel(const char* targetSSID) {
 
 // ========== FONCTION DE SCAN CANAL ESP-NOW ==========
 // Fonction pour scanner les canaux 1-13 et détecter le canal utilisé par l'émetteur ESP-NOW
+// Version améliorée : scanne TOUS les canaux et choisit celui avec le plus de paquets
+// pour éviter les fuites radio isolées
 uint8_t scanForChannel() {
   if (isScanning) {
     DEBUG_PRINTLN("Scan déjà en cours, ignoré");
@@ -468,7 +470,7 @@ uint8_t scanForChannel() {
   detectedChannel = 0;
   
   DEBUG_PRINTLN("========== SCAN CANAL ESP-NOW ==========");
-  Serial.println("Recherche du canal ESP-NOW...");
+  Serial.println("Recherche du canal ESP-NOW (scan complet)...");
   
   // Sauvegarder le canal actuel pour le restaurer en cas d'échec
   uint8_t originalChannel = wifi_get_channel();
@@ -476,11 +478,20 @@ uint8_t scanForChannel() {
     originalChannel = detectedChannel > 0 ? detectedChannel : 1;
   }
   
+  // Tableau pour compter les paquets reçus sur chaque canal
+  uint16_t packetCounts[14] = {0}; // Indices 0-13 (0 non utilisé)
+  uint8_t bestChannel = 0;
+  uint16_t maxPackets = 0;
+  // Minimum de paquets pour valider un canal
+  // Avec 200ms d'écoute et ~120 paquets/sec, le vrai canal devrait avoir ~24 paquets
+  // Les canaux adjacents (fuites) en auront beaucoup moins
+  const uint16_t MIN_PACKETS_TO_VALIDATE = 10;
+  
   // Déinitialiser ESP-NOW avant de commencer le scan
   esp_now_deinit();
-  delay(100); // Laisser le temps à ESP-NOW de se déinitialiser proprement
+  delay(100);
   
-  // Boucle sur les canaux 1-13
+  // Boucle sur les canaux 1-13 - TOUJOURS scanner tous les canaux
   for (uint8_t channel = 1; channel <= 13; channel++) {
     Serial.printf("Test canal %d...\n", channel);
     
@@ -494,28 +505,23 @@ uint8_t scanForChannel() {
     
     // Configurer le canal WiFi AVANT d'initialiser ESP-NOW
     wifi_set_channel(channel);
-    delay(200); // Délai augmenté pour stabilisation du canal WiFi
-    
-    // Vérifier que le canal est bien configuré
-    DEBUG_PRINTF("Canal WiFi après configuration: %d\n", wifi_get_channel());
+    delay(200);
     
     // Réinitialiser ESP-NOW sur le nouveau canal
     esp_now_deinit();
-    delay(100); // Délai augmenté
+    delay(100);
     
     int initResult = esp_now_init();
     if (initResult != 0) {
       Serial.printf("ERREUR: Échec init ESP-NOW sur canal %d (code: %d)\n", channel, initResult);
-      continue; // Passer au canal suivant
+      continue;
     }
-    DEBUG_PRINTLN("ESP-NOW init OK");
     
     // Configurer ESP-NOW pour la réception
     esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
     
-    // Enregistrer le callback de scan temporaire AVANT d'ajouter le peer
+    // Enregistrer le callback de scan temporaire
     esp_now_register_recv_cb(OnScanReceive);
-    DEBUG_PRINTLN("Callback enregistré");
     
     // Ajouter le peer broadcast sur ce canal
     int peerResult = esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_COMBO, channel, NULL, 0);
@@ -523,60 +529,35 @@ uint8_t scanForChannel() {
       Serial.printf("ERREUR: Échec ajout peer broadcast sur canal %d (code: %d)\n", channel, peerResult);
       esp_now_deinit();
       delay(50);
-      continue; // Passer au canal suivant
+      continue;
     }
-    DEBUG_PRINTLN("Peer broadcast ajouté");
     
-    // Réinitialiser le flag de détection
+    // Réinitialiser le compteur pour ce canal
     channelDetected = false;
+    uint16_t packetsOnThisChannel = 0; // uint16_t pour éviter débordement
     
-    // Écouter pendant 500ms (augmenté pour capturer les paquets espacés)
-    DEBUG_PRINTLN("Écoute en cours...");
+    // Écouter pendant 200ms (suffisant pour ~24 paquets à 120/sec)
+    // Réduit pour éviter les WDT reset sur canaux très actifs
     unsigned long scanStartTime = millis();
-    while (millis() - scanStartTime < 500 && !channelDetected) {
-      yield(); // Laisser le temps au système de traiter les événements WiFi
-      delay(1);
+    while (millis() - scanStartTime < 200) {
+      yield(); // IMPORTANT: laisser le système respirer
+      
+      // Si un paquet est détecté, incrémenter le compteur
+      if (channelDetected) {
+        packetsOnThisChannel++;
+        channelDetected = false; // Réinitialiser pour détecter le prochain paquet
+        // Pas de log ici pour éviter WDT reset !
+      }
     }
     
-    // Vérifier si un paquet a été détecté
-    if (channelDetected) {
-      DEBUG_PRINTF(">>> CANAL TROUVÉ : %d !\n", detectedChannel);
-      
-      // Flash vert rapide (3 clignotements)
-      for (int i = 0; i < 3; i++) {
-        FastLED.clear();
-        for (int j = 0; j < min(10, MAXLEDLENGTH); j++) {
-          leds[j] = CRGB::Green;
-        }
-        FastLED.show();
-        delay(100);
-        FastLED.clear();
-        FastLED.show();
-        delay(100);
-      }
-      
-      // Sauvegarder le canal en EEPROM
-      saveDetectedChannel(detectedChannel);
-      
-      // Réinitialiser ESP-NOW et restaurer le callback normal
-      esp_now_deinit();
-      delay(100);
-      if (esp_now_init() != 0) {
-        DEBUG_PRINTLN("ERREUR: Échec réinit ESP-NOW après scan réussi");
-        isScanning = false;
-        return 0;
-      }
-      esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
-      
-      // Réajouter le peer broadcast sur le canal détecté
-      esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_COMBO, detectedChannel, NULL, 0);
-      
-      // Restaurer le callback normal
-      esp_now_register_recv_cb(OnDataRecv);
-      
-      isScanning = false;
-      DEBUG_PRINTLN("========== FIN SCAN CANAL ESP-NOW (SUCCÈS) ==========");
-      return detectedChannel;
+    // Enregistrer le nombre de paquets reçus sur ce canal (plafonné à 255)
+    packetCounts[channel] = (packetsOnThisChannel > 255) ? 255 : packetsOnThisChannel;
+    Serial.printf("Canal %d: %d paquets\n", channel, packetsOnThisChannel);
+    
+    // Mettre à jour le meilleur canal si nécessaire
+    if (packetsOnThisChannel > maxPackets) {
+      maxPackets = packetsOnThisChannel;
+      bestChannel = channel;
     }
     
     // Déinitialiser ESP-NOW avant de passer au canal suivant
@@ -584,29 +565,80 @@ uint8_t scanForChannel() {
     delay(50);
   }
   
-  // Aucun canal trouvé - restaurer le canal original
-  DEBUG_PRINTLN("Aucun canal ESP-NOW détecté");
-  DEBUG_PRINTF("Restauration du canal original: %d\n", originalChannel);
+  // Analyser les résultats
+  DEBUG_PRINTLN("========== RÉSULTATS DU SCAN ==========");
+  for (uint8_t ch = 1; ch <= 13; ch++) {
+    if (packetCounts[ch] > 0) {
+      Serial.printf("  Canal %d: %d paquets\n", ch, packetCounts[ch]);
+    }
+  }
   
-  // Restaurer le canal WiFi original
-  wifi_set_channel(originalChannel);
-  delay(100);
-  
-  // Réinitialiser ESP-NOW sur le canal original
-  if (esp_now_init() != 0) {
-    DEBUG_PRINTLN("ERREUR: Échec réinit ESP-NOW après scan (canal original)");
+  // Vérifier si on a trouvé un canal valide (minimum MIN_PACKETS_TO_VALIDATE paquets)
+  if (maxPackets >= MIN_PACKETS_TO_VALIDATE) {
+    detectedChannel = bestChannel;
+    Serial.printf(">>> CANAL VALIDÉ : %d (%d paquets reçus) !\n", detectedChannel, maxPackets);
+    
+    // Flash vert rapide (3 clignotements)
+    for (int i = 0; i < 3; i++) {
+      FastLED.clear();
+      for (int j = 0; j < min(10, MAXLEDLENGTH); j++) {
+        leds[j] = CRGB::Green;
+      }
+      FastLED.show();
+      delay(100);
+      FastLED.clear();
+      FastLED.show();
+      delay(100);
+    }
+    
+    // Sauvegarder le canal en EEPROM
+    saveDetectedChannel(detectedChannel);
+    
+    // Configurer le canal WiFi final
+    wifi_set_channel(detectedChannel);
+    delay(200);
+    
+    // Réinitialiser ESP-NOW sur le canal détecté
+    esp_now_deinit();
+    delay(100);
+    if (esp_now_init() != 0) {
+      DEBUG_PRINTLN("ERREUR: Échec réinit ESP-NOW après scan réussi");
+      isScanning = false;
+      return 0;
+    }
+    
+    esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
+    esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_COMBO, detectedChannel, NULL, 0);
+    esp_now_register_recv_cb(OnDataRecv);
+    
     isScanning = false;
+    DEBUG_PRINTLN("========== FIN SCAN CANAL ESP-NOW (SUCCÈS) ==========");
+    return detectedChannel;
+  } else {
+    // Aucun canal valide trouvé
+    Serial.println("Aucun canal ESP-NOW valide détecté (pas assez de paquets)");
+    Serial.printf("Meilleur canal: %d (%d paquets, minimum requis: %d)\n", 
+                 bestChannel, maxPackets, MIN_PACKETS_TO_VALIDATE);
+    
+    // Restaurer le canal WiFi original
+    wifi_set_channel(originalChannel);
+    delay(200);
+    
+    // Réinitialiser ESP-NOW sur le canal original
+    if (esp_now_init() != 0) {
+      DEBUG_PRINTLN("ERREUR: Échec réinit ESP-NOW après scan (canal original)");
+      isScanning = false;
+      return 0;
+    }
+    
+    esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
+    esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_COMBO, originalChannel, NULL, 0);
+    esp_now_register_recv_cb(OnDataRecv);
+    
+    isScanning = false;
+    DEBUG_PRINTLN("========== FIN SCAN CANAL ESP-NOW (ÉCHEC) ==========");
     return 0;
   }
-  esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
-  esp_now_register_recv_cb(OnDataRecv);
-  
-  // Réajouter les peers sur le canal original
-  esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_COMBO, originalChannel, NULL, 0);
-  
-  isScanning = false;
-  DEBUG_PRINTLN("========== FIN SCAN CANAL ESP-NOW (ÉCHEC) ==========");
-  return 0;
 }
 // ========== FIN FONCTION DE SCAN CANAL ESP-NOW ==========
 
@@ -957,34 +989,25 @@ void handleRemoteSetup() {
 // Callback utilisé uniquement pendant le scan pour détecter les paquets PoulpyLights
 void OnScanReceive(uint8_t *mac, uint8_t *incomingData, uint8_t len)
 {
-  DEBUG_PRINTF("OnScanReceive: paquet reçu, taille=%d, canal=%d\n", len, wifi_get_channel());
+  // IMPORTANT: Ce callback doit être ULTRA-LÉGER pour éviter les WDT reset
+  // Pas de Serial.print ici ! Les paquets arrivent très vite (~120/sec)
   
   // Vérifier la taille d'un paquet DMX
   if (len == sizeof(struct_dmx_packet))
   {
-    struct_dmx_packet scanPacket;
-    memcpy(&scanPacket, incomingData, sizeof(struct_dmx_packet));
-
-    DEBUG_PRINTF("Signature reçue: %02X %02X %02X\n", 
-                  scanPacket.data[0], scanPacket.data[1], scanPacket.data[2]);
-
-    // Vérifier uniquement la signature PoulpyLights
-    if (scanPacket.data[0] == SIGNATURE_A &&
-        scanPacket.data[1] == SIGNATURE_B &&
-        scanPacket.data[2] == SIGNATURE_C)
+    // Vérifier uniquement la signature PoulpyLights (sans copier tout le paquet)
+    // La signature est dans data[0..2], qui est à l'offset sizeof(blockNumber) + sizeof(dmxvalues)
+    // = 1 + 128 = 129 bytes après le début
+    uint8_t* dataPtr = incomingData + 1 + 128; // Pointer vers data[]
+    
+    if (dataPtr[0] == SIGNATURE_A &&
+        dataPtr[1] == SIGNATURE_B &&
+        dataPtr[2] == SIGNATURE_C)
     {
-      // Signature valide détectée !
+      // Signature valide détectée ! Juste mettre le flag
       channelDetected = true;
-      detectedChannel = wifi_get_channel();
       memcpy(senderMacFromScan, mac, 6);
-      Serial.printf(">>> Paquet PoulpyLights détecté sur canal %d !\n", detectedChannel);
-      DEBUG_PRINTF("MAC émetteur: %02X:%02X:%02X:%02X:%02X:%02X\n",
-                    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    } else {
-      DEBUG_PRINTLN("Paquet reçu mais signature invalide");
     }
-  } else {
-    DEBUG_PRINTF("Paquet de taille incorrecte: %d (attendu: %d)\n", len, sizeof(struct_dmx_packet));
   }
 }
 // ========== FIN CALLBACK SCAN CANAL ==========
@@ -1729,21 +1752,21 @@ void setup()
   Serial.println("\nESP-Now Receiver");
   
   // ========== GESTION CANAL ESP-NOW ==========
-  // Charger le canal mémorisé depuis EEPROM
-  detectedChannel = loadDetectedChannel();
+  // TOUJOURS scanner au démarrage pour s'assurer d'être sur le bon canal
+  // (le canal peut avoir changé si le routeur WiFi a redémarré ou si l'émetteur a changé de réseau)
+  uint8_t lastKnownChannel = loadDetectedChannel();
+  DEBUG_PRINTF("Dernier canal connu en EEPROM: %d\n", lastKnownChannel);
   
-  if (detectedChannel >= 1 && detectedChannel <= 13) {
-    // Canal valide trouvé en EEPROM, l'utiliser directement
-    DEBUG_PRINTF("Utilisation du canal sauvegardé: %d\n", detectedChannel);
-    wifi_set_channel(detectedChannel);
-    delay(100); // Laisser le temps au WiFi de se stabiliser
-  } else {
-    // Aucun canal valide en EEPROM, lancer un scan
-    DEBUG_PRINTLN("Aucun canal valide en EEPROM, lancement du scan...");
-    detectedChannel = scanForChannel();
-    
-    if (detectedChannel == 0) {
-      // Scan échoué, utiliser canal 1 par défaut
+  DEBUG_PRINTLN("Lancement du scan au démarrage...");
+  detectedChannel = scanForChannel();
+  
+  if (detectedChannel == 0) {
+    // Scan échoué, utiliser le dernier canal connu ou canal 1 par défaut
+    if (lastKnownChannel >= 1 && lastKnownChannel <= 13) {
+      Serial.printf("ATTENTION: Scan échoué, utilisation du dernier canal connu: %d\n", lastKnownChannel);
+      detectedChannel = lastKnownChannel;
+      wifi_set_channel(lastKnownChannel);
+    } else {
       Serial.println("ATTENTION: Aucun canal détecté, utilisation du canal 1 par défaut");
       detectedChannel = 1;
       wifi_set_channel(1);
