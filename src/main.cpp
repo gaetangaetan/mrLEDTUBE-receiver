@@ -1,4 +1,4 @@
-#define VERSION 66 // numéro de version pour m'y retrouver pendant le développement
+#define VERSION 68 // numéro de version pour m'y retrouver pendant le développement
 #define VERSION_DATE "2025-11-26" // date de la version
 #define BUTTON_PRESENT false
 
@@ -100,7 +100,7 @@ Le numéro de groupe est enregistré en EEPROM
 #define SIGNATURE_B 0x61 // 0110 0001  
 #define SIGNATURE_C 0x05 // 0000 0101
 
-// Codes de commande 
+// Codes de commande existants
 #define OTA_UPDATE_CMD 0xFA // Code de commande pour lancer une mise à jour firmware
 #define REQUEST_MAC_CMD 0xFB // Code de commande pour demander l'adresse MAC
 #define RESPONSE_MAC_CMD 0xFC // Code de commande pour envoyer l'adresse MAC
@@ -108,6 +108,30 @@ Le numéro de groupe est enregistré en EEPROM
 #define EXIT_REMOTE_SETUP_CMD 0xFE // Code de commande pour sortir du setup à distance
 #define SET_GROUP_NUMBER_CMD 0xFF // Code de commande pour définir le numéro de groupe
 #define PANIC_RESTART_CMD 0xF9 // Code de commande pour redémarrer tous les récepteurs
+
+// ========== NOUVELLES COMMANDES (v67+) ==========
+// Requêtes (émetteur -> récepteur)
+#define GET_INFO_CMD           0xE0  // Demande toutes les infos du récepteur
+#define GET_CHANNEL_CMD        0xE1  // Demande le canal WiFi actuel
+#define START_SCAN_CMD         0xE2  // Lancer un scan des canaux
+#define SET_LED_COUNT_CMD      0xE4  // Définir le nombre de LEDs
+#define START_STATS_CMD        0xE5  // Démarrer envoi stats périodiques
+#define STOP_STATS_CMD         0xE6  // Arrêter envoi stats périodiques
+#define SET_BRIGHTNESS_CMD     0xE7  // Définir luminosité max
+#define RESTART_SINGLE_CMD     0xE8  // Redémarrer ce récepteur spécifique
+#define SAVE_CONFIG_CMD        0xE9  // Sauvegarder config en EEPROM
+#define IDENTIFY_CMD           0xEA  // Faire clignoter pour identifier
+#define PING_CMD               0xEB  // Test de connectivité
+
+// Réponses (récepteur -> émetteur)
+#define RESPONSE_INFO_CMD      0xD0  // Réponse avec toutes les infos
+#define RESPONSE_CHANNEL_CMD   0xD1  // Réponse canal WiFi
+#define RESPONSE_SCAN_CMD      0xD2  // Réponse résultats scan
+#define RESPONSE_STATS_CMD     0xD3  // Stats périodiques
+#define RESPONSE_ACK_CMD       0xD4  // Accusé de réception simple
+#define RESPONSE_ERROR_CMD     0xD5  // Erreur
+#define RESPONSE_PONG_CMD      0xD6  // Réponse au ping
+// ========== FIN NOUVELLES COMMANDES ==========
 
 #include <Arduino.h>
 #include <EEPROM.h>
@@ -238,6 +262,18 @@ bool channelDetected = false;       // Flag de détection pendant le scan
 uint8_t senderMacFromScan[6];      // MAC de l'émetteur détecté pendant le scan
 unsigned long lastPacketTime = 0;   // Timestamp du dernier paquet reçu
 bool isScanning = false;           // Flag pour éviter les scans multiples simultanés
+
+// ========== VARIABLES POUR COMMANDES AVANCÉES ==========
+bool statsStreamActive = false;          // Envoi périodique de stats activé
+unsigned long lastStatsStreamTime = 0;   // Dernier envoi de stats périodiques
+uint32_t statsStreamPacketCount = 0;     // Paquets reçus depuis dernier envoi stats
+uint8_t maxBrightness = 255;             // Luminosité maximale (0-255)
+unsigned long bootTime = 0;              // Timestamp du démarrage (pour uptime)
+bool identifyActive = false;             // Mode identification actif
+unsigned long identifyEndTime = 0;       // Fin du mode identification
+uint8_t scanResultsPerChannel[14] = {0}; // Résultats du scan (canaux 1-13, index 0 non utilisé)
+uint8_t scanBestChannel = 0;             // Meilleur canal trouvé lors du scan
+// ========== FIN VARIABLES COMMANDES AVANCÉES ==========
 // ========== FIN VARIABLES SCAN CANAL WIFI ==========
 
 void OnDataSent(u8 *mac_addr, u8 status) {} // quand on utilise ESP_NOW, la fonction OnDataSent doit être déclarée mais, concrètement, on n'en a pas besoin (pour l'instant, aucune donnée n'est renvoyée par les récepteurs à l'émetteur)
@@ -897,6 +933,414 @@ void sendMACResponse() {
 }
 // ========== FIN FONCTIONNALITÉ DÉCOUVERTE MAC ==========
 
+// ========== NOUVELLES FONCTIONNALITÉS DE COMMANDE ==========
+
+// Fonction utilitaire pour préparer un paquet de réponse
+void prepareResponsePacket(struct_dmx_packet* packet, uint8_t cmdType) {
+  packet->blockNumber = 255;  // Indique un paquet de commande
+  memset(packet->dmxvalues, 0, sizeof(packet->dmxvalues));
+  memset(packet->data, 0, sizeof(packet->data));
+  packet->data[0] = SIGNATURE_A;
+  packet->data[1] = SIGNATURE_B;
+  packet->data[2] = SIGNATURE_C;
+  packet->data[3] = cmdType;
+  
+  // Ajouter l'adresse MAC du récepteur (bytes 4-9)
+  uint8_t mac[6];
+  WiFi.macAddress(mac);
+  for (int i = 0; i < 6; i++) {
+    packet->data[4 + i] = mac[i];
+  }
+}
+
+// Fonction utilitaire pour envoyer un paquet de réponse
+void sendResponsePacket(struct_dmx_packet* packet) {
+  uint8_t* targetAddress;
+  if (hasSenderAddress) {
+    if (!esp_now_is_peer_exist(senderMacAddress)) {
+      int peerResult = esp_now_add_peer(senderMacAddress, ESP_NOW_ROLE_COMBO, detectedChannel, NULL, 0);
+      if (peerResult != 0) {
+        targetAddress = broadcastAddress;
+      } else {
+        targetAddress = senderMacAddress;
+      }
+    } else {
+      targetAddress = senderMacAddress;
+    }
+  } else {
+    targetAddress = broadcastAddress;
+  }
+  esp_now_send(targetAddress, (uint8_t*)packet, sizeof(struct_dmx_packet));
+}
+
+// Réponse INFO complète : toutes les infos du récepteur
+void sendInfoResponse() {
+  Serial.println("========== ENVOI INFO RESPONSE ==========");
+  
+  struct_dmx_packet responsePacket;
+  prepareResponsePacket(&responsePacket, RESPONSE_INFO_CMD);
+  
+  // data[4-9] : MAC (déjà rempli par prepareResponsePacket)
+  responsePacket.data[10] = setupTubeNumber;           // Groupe actuel
+  responsePacket.data[11] = VERSION;                   // Version firmware
+  responsePacket.data[12] = detectedChannel;           // Canal WiFi actuel
+  
+  // Nombre de LEDs (uint16_t en little-endian)
+  uint16_t ledCount = LEDNUMBER;
+  responsePacket.data[13] = ledCount & 0xFF;
+  responsePacket.data[14] = (ledCount >> 8) & 0xFF;
+  
+  responsePacket.data[15] = maxBrightness;             // Luminosité max
+  responsePacket.data[16] = (int8_t)lastRSSI;          // RSSI
+  
+  // Uptime en secondes (uint32_t en little-endian)
+  uint32_t uptime = (millis() - bootTime) / 1000;
+  responsePacket.data[17] = uptime & 0xFF;
+  responsePacket.data[18] = (uptime >> 8) & 0xFF;
+  responsePacket.data[19] = (uptime >> 16) & 0xFF;
+  responsePacket.data[20] = (uptime >> 24) & 0xFF;
+  
+  // Heap libre (uint32_t en little-endian)
+  uint32_t freeHeap = ESP.getFreeHeap();
+  responsePacket.data[21] = freeHeap & 0xFF;
+  responsePacket.data[22] = (freeHeap >> 8) & 0xFF;
+  responsePacket.data[23] = (freeHeap >> 16) & 0xFF;
+  responsePacket.data[24] = (freeHeap >> 24) & 0xFF;
+  
+  // Mode actuel (0=RUNNING, 1=SETUP, 2=SCAN, 3=IDENTIFY)
+  uint8_t mode = 0;
+  if (etat == SETUP || remoteConfigActive) mode = 1;
+  else if (isScanning) mode = 2;
+  else if (identifyActive) mode = 3;
+  responsePacket.data[25] = mode;
+  
+  // Stats streaming actif
+  responsePacket.data[26] = statsStreamActive ? 1 : 0;
+  
+  sendResponsePacket(&responsePacket);
+  
+  Serial.printf("Info envoyée | Groupe:%d | Canal:%d | LEDs:%d | RSSI:%d\n",
+                setupTubeNumber, detectedChannel, LEDNUMBER, lastRSSI);
+  Serial.println("========== FIN ENVOI INFO RESPONSE ==========");
+}
+
+// Réponse CHANNEL : canal WiFi actuel
+void sendChannelResponse() {
+  Serial.println("========== ENVOI CHANNEL RESPONSE ==========");
+  
+  struct_dmx_packet responsePacket;
+  prepareResponsePacket(&responsePacket, RESPONSE_CHANNEL_CMD);
+  
+  responsePacket.data[10] = detectedChannel;  // Canal actuel
+  responsePacket.data[11] = wifi_get_channel(); // Canal WiFi réel
+  
+  sendResponsePacket(&responsePacket);
+  
+  Serial.printf("Canal envoyé: détecté=%d, réel=%d\n", detectedChannel, wifi_get_channel());
+  Serial.println("========== FIN ENVOI CHANNEL RESPONSE ==========");
+}
+
+// Réponse SCAN : résultats du scan de canaux
+void sendScanResponse() {
+  Serial.println("========== ENVOI SCAN RESPONSE ==========");
+  
+  struct_dmx_packet responsePacket;
+  prepareResponsePacket(&responsePacket, RESPONSE_SCAN_CMD);
+  
+  responsePacket.data[10] = scanBestChannel;  // Meilleur canal trouvé
+  responsePacket.data[11] = 13;               // Nombre de canaux scannés
+  
+  // Paquets reçus par canal (canaux 1-13)
+  for (int i = 1; i <= 13; i++) {
+    responsePacket.data[11 + i] = scanResultsPerChannel[i];
+  }
+  
+  sendResponsePacket(&responsePacket);
+  
+  Serial.printf("Résultats scan envoyés | Meilleur canal: %d\n", scanBestChannel);
+  Serial.println("========== FIN ENVOI SCAN RESPONSE ==========");
+}
+
+// Réponse STATS : statistiques périodiques
+void sendStatsResponse() {
+  struct_dmx_packet responsePacket;
+  prepareResponsePacket(&responsePacket, RESPONSE_STATS_CMD);
+  
+  // Paquets DMX reçus depuis dernier rapport (uint32_t en little-endian)
+  responsePacket.data[10] = statsStreamPacketCount & 0xFF;
+  responsePacket.data[11] = (statsStreamPacketCount >> 8) & 0xFF;
+  responsePacket.data[12] = (statsStreamPacketCount >> 16) & 0xFF;
+  responsePacket.data[13] = (statsStreamPacketCount >> 24) & 0xFF;
+  
+  responsePacket.data[14] = (int8_t)lastRSSI;     // RSSI actuel
+  responsePacket.data[15] = detectedChannel;       // Canal WiFi
+  
+  // Uptime en secondes (uint32_t en little-endian)
+  uint32_t uptime = (millis() - bootTime) / 1000;
+  responsePacket.data[16] = uptime & 0xFF;
+  responsePacket.data[17] = (uptime >> 8) & 0xFF;
+  responsePacket.data[18] = (uptime >> 16) & 0xFF;
+  responsePacket.data[19] = (uptime >> 24) & 0xFF;
+  
+  responsePacket.data[20] = setupTubeNumber;       // Groupe actuel
+  
+  sendResponsePacket(&responsePacket);
+  
+  // Reset du compteur après envoi
+  statsStreamPacketCount = 0;
+}
+
+// Réponse ACK : accusé de réception simple
+void sendAckResponse(uint8_t originalCmd, uint8_t status) {
+  struct_dmx_packet responsePacket;
+  prepareResponsePacket(&responsePacket, RESPONSE_ACK_CMD);
+  
+  responsePacket.data[10] = originalCmd;  // Commande à laquelle on répond
+  responsePacket.data[11] = status;       // 0 = OK, autre = erreur
+  
+  sendResponsePacket(&responsePacket);
+  Serial.printf("ACK envoyé pour cmd 0x%02X, status: %d\n", originalCmd, status);
+}
+
+// Réponse PONG : réponse au ping
+void sendPongResponse() {
+  struct_dmx_packet responsePacket;
+  prepareResponsePacket(&responsePacket, RESPONSE_PONG_CMD);
+  
+  responsePacket.data[10] = (int8_t)lastRSSI;  // RSSI
+  responsePacket.data[11] = detectedChannel;   // Canal
+  
+  // Timestamp actuel (pour calcul latence si besoin)
+  uint32_t timestamp = millis();
+  responsePacket.data[12] = timestamp & 0xFF;
+  responsePacket.data[13] = (timestamp >> 8) & 0xFF;
+  responsePacket.data[14] = (timestamp >> 16) & 0xFF;
+  responsePacket.data[15] = (timestamp >> 24) & 0xFF;
+  
+  sendResponsePacket(&responsePacket);
+  Serial.println("PONG envoyé");
+}
+
+// Fonction pour lancer un scan complet des canaux avec statistiques
+void performChannelScanWithStats() {
+  Serial.println("========== SCAN DES CANAUX AVEC STATS ==========");
+  isScanning = true;
+  
+  // Réinitialiser les résultats
+  memset(scanResultsPerChannel, 0, sizeof(scanResultsPerChannel));
+  scanBestChannel = 0;
+  uint8_t maxPackets = 0;
+  
+  // Sauvegarder le canal actuel
+  uint8_t originalChannel = detectedChannel;
+  
+  // Scanner chaque canal pendant 500ms
+  for (uint8_t ch = 1; ch <= 13; ch++) {
+    Serial.printf("Scan canal %d...\n", ch);
+    
+    // Réinitialiser ESP-NOW pour ce canal
+    esp_now_deinit();
+    wifi_set_channel(ch);
+    delay(50);
+    
+    if (esp_now_init() != 0) {
+      Serial.printf("Erreur init ESP-NOW sur canal %d\n", ch);
+      continue;
+    }
+    esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
+    
+    // Compter les paquets pendant 500ms
+    channelDetected = false;
+    uint8_t packetCount = 0;
+    unsigned long scanStart = millis();
+    
+    // Utiliser le callback de scan temporaire
+    esp_now_register_recv_cb([](uint8_t *mac, uint8_t *data, uint8_t len) {
+      // Vérifier la signature PoulpyLights
+      if (len >= 132 && data[129] == SIGNATURE_A && data[130] == SIGNATURE_B && data[131] == SIGNATURE_C) {
+        channelDetected = true;
+      }
+    });
+    
+    // Attendre et compter
+    while (millis() - scanStart < 500) {
+      if (channelDetected) {
+        packetCount++;
+        channelDetected = false;
+      }
+      yield();
+    }
+    
+    scanResultsPerChannel[ch] = packetCount;
+    Serial.printf("Canal %d: %d paquets\n", ch, packetCount);
+    
+    if (packetCount > maxPackets) {
+      maxPackets = packetCount;
+      scanBestChannel = ch;
+    }
+    
+    // Feedback visuel
+    leds[0] = CRGB::Blue;
+    leds[ch] = (packetCount > 0) ? CRGB::Green : CRGB::Red;
+    FastLED.show();
+  }
+  
+  // Restaurer le canal original ou utiliser le meilleur
+  if (scanBestChannel > 0) {
+    detectedChannel = scanBestChannel;
+    saveDetectedChannel(detectedChannel);
+  } else {
+    detectedChannel = originalChannel;
+  }
+  
+  // Réinitialiser ESP-NOW sur le canal choisi
+  esp_now_deinit();
+  wifi_set_channel(detectedChannel);
+  delay(100);
+  
+  if (esp_now_init() == 0) {
+    esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
+    extern void OnDataRecv(uint8_t*, uint8_t*, uint8_t);
+    esp_now_register_recv_cb(OnDataRecv);
+    esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_COMBO, detectedChannel, NULL, 0);
+  }
+  
+  isScanning = false;
+  
+  // Afficher le résultat
+  if (scanBestChannel > 0) {
+    for (int i = 0; i < min((int)scanBestChannel, LEDNUMBER); i++) {
+      leds[i] = CRGB::Green;
+    }
+  } else {
+    leds[0] = CRGB::Red;
+  }
+  FastLED.show();
+  delay(1000);
+  
+  Serial.printf("Scan terminé | Meilleur canal: %d avec %d paquets\n", scanBestChannel, maxPackets);
+  Serial.println("========== FIN SCAN DES CANAUX ==========");
+  
+  // Envoyer les résultats
+  sendScanResponse();
+}
+
+// Fonction pour le mode identification (clignotement blanc)
+void handleIdentifyMode() {
+  if (!identifyActive) return;
+  
+  if (millis() > identifyEndTime) {
+    identifyActive = false;
+    // Éteindre les LEDs
+    fill_solid(leds, LEDNUMBER, CRGB::Black);
+    FastLED.show();
+    Serial.println("Fin mode identification");
+    return;
+  }
+  
+  // Clignotement rapide en blanc
+  static unsigned long lastBlink = 0;
+  static bool blinkOn = false;
+  
+  if (millis() - lastBlink > 200) {
+    blinkOn = !blinkOn;
+    fill_solid(leds, LEDNUMBER, blinkOn ? CRGB::White : CRGB::Black);
+    FastLED.show();
+    lastBlink = millis();
+  }
+}
+
+// Traitement des nouvelles commandes
+void handleNewCommand(uint8_t cmd, uint8_t* data, uint8_t len) {
+  Serial.printf("Traitement nouvelle commande: 0x%02X\n", cmd);
+  
+  switch (cmd) {
+    case GET_INFO_CMD:
+      sendInfoResponse();
+      break;
+      
+    case GET_CHANNEL_CMD:
+      sendChannelResponse();
+      break;
+      
+    case START_SCAN_CMD:
+      performChannelScanWithStats();
+      break;
+      
+    case SET_LED_COUNT_CMD:
+      // data[4-5] contient le nouveau nombre de LEDs (uint16_t)
+      if (len >= 6) {
+        uint16_t newLedCount = data[4] | (data[5] << 8);
+        if (newLedCount > 0 && newLedCount <= MAXLEDLENGTH) {
+          // Note: LEDNUMBER est un #define, donc on ne peut pas le modifier dynamiquement
+          // On envoie un ACK pour confirmer la réception
+          Serial.printf("Demande changement LEDs: %d (non implémenté dynamiquement)\n", newLedCount);
+          sendAckResponse(SET_LED_COUNT_CMD, 1);  // 1 = non supporté
+        } else {
+          sendAckResponse(SET_LED_COUNT_CMD, 2);  // 2 = valeur invalide
+        }
+      }
+      break;
+      
+    case START_STATS_CMD:
+      statsStreamActive = true;
+      statsStreamPacketCount = 0;
+      lastStatsStreamTime = millis();
+      Serial.println("Envoi stats périodiques ACTIVÉ");
+      sendAckResponse(START_STATS_CMD, 0);
+      break;
+      
+    case STOP_STATS_CMD:
+      statsStreamActive = false;
+      Serial.println("Envoi stats périodiques DÉSACTIVÉ");
+      sendAckResponse(STOP_STATS_CMD, 0);
+      break;
+      
+    case SET_BRIGHTNESS_CMD:
+      if (len >= 5) {
+        maxBrightness = data[4];
+        FastLED.setBrightness(maxBrightness);
+        Serial.printf("Luminosité max définie: %d\n", maxBrightness);
+        sendAckResponse(SET_BRIGHTNESS_CMD, 0);
+      }
+      break;
+      
+    case RESTART_SINGLE_CMD:
+      Serial.println("Redémarrage demandé...");
+      sendAckResponse(RESTART_SINGLE_CMD, 0);
+      delay(500);
+      ESP.restart();
+      break;
+      
+    case SAVE_CONFIG_CMD:
+      // Sauvegarder la config actuelle en EEPROM
+      EEPROM.write(EEPROM_ADDR_SETUP_TUBE, setupTubeNumber);
+      EEPROM.write(EEPROM_ADDR_DETECTED_CHANNEL, detectedChannel);
+      EEPROM.commit();
+      Serial.println("Configuration sauvegardée en EEPROM");
+      sendAckResponse(SAVE_CONFIG_CMD, 0);
+      break;
+      
+    case IDENTIFY_CMD:
+      identifyActive = true;
+      identifyEndTime = millis() + 3000;  // 3 secondes de clignotement
+      Serial.println("Mode identification activé");
+      sendAckResponse(IDENTIFY_CMD, 0);
+      break;
+      
+    case PING_CMD:
+      sendPongResponse();
+      break;
+      
+    default:
+      Serial.printf("Commande inconnue: 0x%02X\n", cmd);
+      sendAckResponse(cmd, 255);  // 255 = commande inconnue
+      break;
+  }
+}
+
+// ========== FIN NOUVELLES FONCTIONNALITÉS ==========
+
 // ========== FONCTIONNALITÉ SETUP À DISTANCE ==========
 
 // Fonction pour entrer en mode setup à distance
@@ -1104,6 +1548,23 @@ void OnDataRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len)
         return;
       }
       
+      // ========== NOUVELLES COMMANDES (v67+) ==========
+      uint8_t cmdCode = incomingDMXPacket.data[3];
+      
+      // Vérifier si c'est une des nouvelles commandes (plage 0xE0-0xEF)
+      if (cmdCode >= 0xE0 && cmdCode <= 0xEF) {
+        // Stocker l'adresse MAC de l'émetteur pour pouvoir lui répondre
+        memcpy(senderMacAddress, mac, 6);
+        hasSenderAddress = true;
+        
+        // Vérifier si la commande est destinée à ce récepteur
+        if (isCommandForMe(incomingDMXPacket.data)) {
+          handleNewCommand(cmdCode, incomingDMXPacket.data, sizeof(incomingDMXPacket.data));
+        }
+        return;
+      }
+      // ========== FIN NOUVELLES COMMANDES ==========
+      
       // ========== FIN GESTION COMMANDES SPÉCIALES ==========
 
       // IGNORER les paquets DMX normaux si en mode configuration à distance
@@ -1116,6 +1577,7 @@ void OnDataRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len)
       if (packetNumber < 4)
       {
         statsDMXPackets++; // Incrémenter le compteur DMX
+        statsStreamPacketCount++; // Incrémenter le compteur pour stats streaming
         for (int i = 0; i < 128; i++)
         {
           dmxChannels[(packetNumber * 128) + i] = incomingDMXPacket.dmxvalues[i];
@@ -1721,6 +2183,7 @@ void longPressStart1() // un clic long, permet de passer de RUNNING à SETUP et 
 
 void setup()
 {
+  bootTime = millis();  // Enregistrer le temps de démarrage pour calcul uptime
   randomHueOffset = rand()%256;
   Serial.begin(115200);
   Serial.println("");
@@ -1877,6 +2340,17 @@ void loop()
     // statsInvalidPackets = 0;
   }
   // ========== FIN AFFICHAGE STATISTIQUES ==========
+
+  // ========== ENVOI STATS PÉRIODIQUES (si activé) ==========
+  if (statsStreamActive && (currentTime - lastStatsStreamTime >= 1000)) {
+    sendStatsResponse();
+    lastStatsStreamTime = currentTime;
+  }
+  // ========== FIN ENVOI STATS PÉRIODIQUES ==========
+
+  // ========== GESTION MODE IDENTIFICATION ==========
+  handleIdentifyMode();
+  // ========== FIN GESTION IDENTIFICATION ==========
 
   // ========== SURVEILLANCE TIMEOUT ET SCAN AUTOMATIQUE ==========
   // Vérifier si plus de 2 secondes sans recevoir de paquet
