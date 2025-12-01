@@ -1,0 +1,1039 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LED Tubes UI - Development</title>
+    <style>
+/* ===============================================
+   POULPYLIGHTS - LED TUBES CONTROL UI v2
+   Theme: Dark Cyber / Compact Modal
+   =============================================== */
+
+:root {
+    --bg-primary: #0d1117;
+    --bg-secondary: #161b22;
+    --bg-tertiary: #21262d;
+    --bg-card: #1c2128;
+    --bg-modal: #0d1117;
+    --border: #30363d;
+    --border-highlight: #58a6ff;
+    --text-primary: #e6edf3;
+    --text-secondary: #8b949e;
+    --text-muted: #484f58;
+    --accent: #58a6ff;
+    --accent-hover: #79b8ff;
+    --success: #3fb950;
+    --warning: #d29922;
+    --danger: #f85149;
+    --purple: #a371f7;
+    --pink: #db61a2;
+    --cyan: #56d4dd;
+    --orange: #f0883e;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+    line-height: 1.5;
+}
+
+/* ===== Header ===== */
+.header {
+    background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+}
+
+.logo {
+    font-size: 18px;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--cyan), var(--purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -0.5px;
+}
+
+.mode-badge {
+    font-size: 10px;
+    padding: 3px 8px;
+    background: var(--warning);
+    color: #000;
+    border-radius: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* ===== Main Content ===== */
+.main-content {
+    padding: 16px;
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+/* ===== Action Bar ===== */
+.action-bar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    flex: 1;
+}
+
+.btn:hover {
+    background: var(--bg-secondary);
+    border-color: var(--accent);
+}
+
+.btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.btn-primary:hover {
+    background: var(--accent-hover);
+}
+
+.btn-danger {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #fff;
+    flex: 0;
+    padding: 10px 16px;
+}
+
+.btn-small {
+    padding: 6px 12px;
+    font-size: 12px;
+    flex: 0;
+}
+
+/* ===== Receiver List ===== */
+.receiver-list-container {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.list-header {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--bg-secondary);
+}
+
+.list-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.receiver-list {
+    max-height: calc(100vh - 200px);
+    overflow-y: auto;
+}
+
+.receiver-card {
+    display: flex;
+    align-items: center;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.receiver-card:last-child {
+    border-bottom: none;
+}
+
+.receiver-card:hover {
+    background: var(--bg-tertiary);
+}
+
+.receiver-card:active {
+    background: var(--bg-secondary);
+}
+
+.receiver-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, var(--purple), var(--pink));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    margin-right: 12px;
+    flex-shrink: 0;
+}
+
+.receiver-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.receiver-mac {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.receiver-meta {
+    font-size: 10px;
+    color: var(--text-secondary);
+    display: flex;
+    gap: 10px;
+    margin-top: 2px;
+}
+
+.badge {
+    padding: 3px 7px;
+    border-radius: 5px;
+    font-size: 10px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.badge-group {
+    background: var(--purple);
+    color: #fff;
+}
+
+/* ===== MODAL OVERLAY ===== */
+.modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--bg-modal);
+    z-index: 100;
+    overflow-y: auto;
+}
+
+.modal-overlay.active {
+    display: block;
+}
+
+.modal-content {
+    max-width: 500px;
+    margin: 0 auto;
+    padding: 16px;
+    min-height: 100vh;
+}
+
+/* ===== Modal Header ===== */
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 0;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.modal-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.modal-title .icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--cyan), var(--accent));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+}
+
+.modal-title-text {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.modal-title-sub {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.close-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 18px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.close-btn:hover {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #fff;
+}
+
+/* ===== Stats Section (compact) ===== */
+.stats-section {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.stat-card {
+    background: linear-gradient(135deg, rgba(63, 185, 80, 0.15), rgba(63, 185, 80, 0.05));
+    border: 1px solid rgba(63, 185, 80, 0.3);
+    border-radius: 10px;
+    padding: 12px;
+    text-align: center;
+}
+
+.stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--success);
+    font-family: 'JetBrains Mono', monospace;
+    line-height: 1;
+}
+
+.stat-label {
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* ===== Info Grid (compact) ===== */
+.info-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 12px;
+    overflow: hidden;
+}
+
+.info-header {
+    padding: 10px 12px;
+    background: var(--bg-secondary);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1px;
+    background: var(--border);
+}
+
+.info-item {
+    background: var(--bg-card);
+    padding: 10px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.info-item.editable {
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.info-item.editable:hover {
+    background: var(--bg-tertiary);
+}
+
+.info-label {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.info-value {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.info-value.highlight {
+    color: var(--cyan);
+}
+
+.info-value.editable-value {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.info-value .edit-icon {
+    font-size: 10px;
+    color: var(--accent);
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.info-item.editable:hover .edit-icon {
+    opacity: 1;
+}
+
+/* ===== Edit Row (inline) ===== */
+.edit-row {
+    display: none;
+    padding: 10px 12px;
+    background: var(--bg-tertiary);
+    border-top: 1px solid var(--border);
+    align-items: center;
+    gap: 8px;
+}
+
+.edit-row.active {
+    display: flex;
+}
+
+.edit-row input[type="range"] {
+    flex: 1;
+    -webkit-appearance: none;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--border);
+}
+
+.edit-row input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+}
+
+.edit-row input[type="number"] {
+    width: 70px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 13px;
+    text-align: center;
+}
+
+.edit-row .edit-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--accent);
+    width: 35px;
+    text-align: right;
+}
+
+.edit-row .btn {
+    flex: 0;
+    padding: 6px 14px;
+}
+
+/* ===== Group Selector ===== */
+.group-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 12px;
+    overflow: hidden;
+}
+
+.group-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+    padding: 12px;
+}
+
+.group-btn {
+    padding: 10px 8px;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.group-btn:hover {
+    border-color: var(--accent);
+    color: var(--text-primary);
+}
+
+.group-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+/* ===== Actions (compact grid) ===== */
+.actions-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.actions-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--border);
+}
+
+.action-btn {
+    background: var(--bg-card);
+    border: none;
+    padding: 14px 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+    color: var(--text-secondary);
+}
+
+.action-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.action-btn .icon {
+    font-size: 18px;
+}
+
+.action-btn .label {
+    font-size: 10px;
+    font-weight: 500;
+}
+
+.action-btn.danger:hover {
+    background: rgba(248, 81, 73, 0.15);
+    color: var(--danger);
+}
+
+/* ===== Empty State ===== */
+.empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-muted);
+}
+
+.empty-state .icon {
+    font-size: 40px;
+    margin-bottom: 12px;
+    opacity: 0.5;
+}
+
+/* ===== Toast ===== */
+.toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    padding: 10px 20px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 13px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    transition: transform 0.3s ease;
+    z-index: 200;
+}
+
+.toast.show {
+    transform: translateX(-50%) translateY(0);
+}
+
+.toast.success {
+    border-color: var(--success);
+    background: rgba(63, 185, 80, 0.15);
+}
+
+.toast.error {
+    border-color: var(--danger);
+    background: rgba(248, 81, 73, 0.15);
+}
+
+/* ===== Scrollbar ===== */
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="logo">⚡ PoulpyLights</div>
+        <span class="mode-badge">DEV UI</span>
+    </header>
+
+    <!-- Main Content (Receiver List) -->
+    <main class="main-content" id="main-content">
+        <div class="action-bar">
+            <button class="btn btn-primary" onclick="scanReceivers()">
+                🔍 Scan
+            </button>
+            <button class="btn" onclick="updateAllFirmware()">
+                🔄 Update All
+            </button>
+            <button class="btn btn-danger" onclick="sendPanic()">
+                🚨
+            </button>
+        </div>
+
+        <div class="receiver-list-container">
+            <div class="list-header">
+                <span class="list-title">📋 Receivers</span>
+                <span id="receiver-count" style="font-size: 11px; color: var(--text-muted);">0</span>
+            </div>
+            <div class="receiver-list" id="receiver-list">
+                <div class="empty-state">
+                    <div class="icon">📡</div>
+                    <p>Tap "Scan" to discover receivers</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal Overlay (Selected Receiver) -->
+    <div class="modal-overlay" id="modal-overlay">
+        <div class="modal-content">
+            <!-- Modal Header -->
+            <div class="modal-header">
+                <div class="modal-title">
+                    <div class="icon">💡</div>
+                    <div>
+                        <div class="modal-title-text" id="modal-mac">--:--:--:--:--:--</div>
+                        <div class="modal-title-sub">Receiver <span id="modal-firmware">-</span></div>
+                    </div>
+                </div>
+                <button class="close-btn" onclick="closeModal()">✕</button>
+            </div>
+
+            <!-- Live Stats (always visible) -->
+            <div class="stats-section">
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-packets">--</div>
+                    <div class="stat-label">Packets/sec</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-rssi">--</div>
+                    <div class="stat-label">RSSI (dBm)</div>
+                </div>
+            </div>
+
+            <!-- Info Section with editable fields -->
+            <div class="info-section">
+                <div class="info-header">📊 Info</div>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="info-label">Channel</span>
+                        <span class="info-value" id="info-channel">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Uptime</span>
+                        <span class="info-value" id="info-uptime">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Free Heap</span>
+                        <span class="info-value" id="info-heap">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Mode</span>
+                        <span class="info-value" id="info-mode">-</span>
+                    </div>
+                </div>
+                
+                <!-- Editable: LED Count -->
+                <div class="info-item editable" onclick="toggleEdit('leds')">
+                    <span class="info-label">LED Count</span>
+                    <span class="info-value editable-value">
+                        <span id="info-leds">144</span>
+                        <span class="edit-icon">✏️</span>
+                    </span>
+                </div>
+                <div class="edit-row" id="edit-leds">
+                    <input type="number" id="input-leds" min="1" max="300" value="144">
+                    <button class="btn btn-primary" onclick="setLedCount()">Set</button>
+                </div>
+                
+                <!-- Editable: Brightness -->
+                <div class="info-item editable" onclick="toggleEdit('brightness')">
+                    <span class="info-label">Brightness</span>
+                    <span class="info-value editable-value">
+                        <span id="info-brightness">255</span>
+                        <span class="edit-icon">✏️</span>
+                    </span>
+                </div>
+                <div class="edit-row" id="edit-brightness">
+                    <input type="range" id="input-brightness" min="0" max="255" value="255" oninput="updateBrightnessPreview()">
+                    <span class="edit-value" id="brightness-preview">255</span>
+                    <button class="btn btn-primary" onclick="setBrightness()">Set</button>
+                </div>
+            </div>
+
+            <!-- Group Assignment -->
+            <div class="group-section">
+                <div class="info-header">👥 Group</div>
+                <div class="group-grid" id="group-grid">
+                    <!-- Generated by JS -->
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="actions-section">
+                <div class="info-header">🛠️ Actions</div>
+                <div class="actions-grid">
+                    <button class="action-btn" onclick="getReceiverInfo()">
+                        <span class="icon">ℹ️</span>
+                        <span class="label">Refresh</span>
+                    </button>
+                    <button class="action-btn" onclick="scanChannels()">
+                        <span class="icon">📶</span>
+                        <span class="label">Scan Ch</span>
+                    </button>
+                    <button class="action-btn" onclick="updateFirmware()">
+                        <span class="icon">🔄</span>
+                        <span class="label">Update</span>
+                    </button>
+                    <button class="action-btn" onclick="saveConfig()">
+                        <span class="icon">💾</span>
+                        <span class="label">Save</span>
+                    </button>
+                    <button class="action-btn danger" onclick="restartReceiver()">
+                        <span class="icon">🔁</span>
+                        <span class="label">Restart</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="toast"></div>
+
+    <script>
+// ===== MOCK DATA =====
+const mockReceivers = [
+    { mac: "8C:AA:B5:52:89:92", group: 2, firmware: "Nov 27 2025 14:32:15", channel: 3, leds: 144, brightness: 255, rssi: -62, uptime: 8100, heap: 33280, mode: "DMX" },
+    { mac: "8C:AA:B5:52:8A:01", group: 0, firmware: "Nov 27 2025 14:32:15", channel: 3, leds: 288, brightness: 200, rssi: -58, uptime: 12400, heap: 31744, mode: "DMX" },
+    { mac: "8C:AA:B5:52:8B:F3", group: 5, firmware: "Nov 26 2025 10:15:42", channel: 3, leds: 144, brightness: 255, rssi: -71, uptime: 3600, heap: 34560, mode: "CONFIG" },
+];
+
+let selectedReceiver = null;
+let statsInterval = null;
+
+// ===== RECEIVER LIST =====
+function renderReceivers() {
+    const list = document.getElementById('receiver-list');
+    
+    if (mockReceivers.length === 0) {
+        list.innerHTML = `
+            <div class="empty-state">
+                <div class="icon">📡</div>
+                <p>Tap "Scan" to discover receivers</p>
+            </div>
+        `;
+        document.getElementById('receiver-count').textContent = '0';
+        return;
+    }
+    
+    list.innerHTML = mockReceivers.map(r => `
+        <div class="receiver-card" onclick="selectReceiver('${r.mac}')">
+            <div class="receiver-icon">💡</div>
+            <div class="receiver-info">
+                <div class="receiver-mac">${r.mac}</div>
+                <div class="receiver-meta">
+                    <span>${r.rssi} dBm</span>
+                    <span>${r.leds} LEDs</span>
+                </div>
+            </div>
+            <span class="badge badge-group">G${r.group}</span>
+        </div>
+    `).join('');
+    
+    document.getElementById('receiver-count').textContent = mockReceivers.length;
+}
+
+// ===== MODAL =====
+function selectReceiver(mac) {
+    selectedReceiver = mockReceivers.find(r => r.mac === mac);
+    if (!selectedReceiver) return;
+    
+    // Update modal content
+    document.getElementById('modal-mac').textContent = mac;
+    document.getElementById('modal-firmware').textContent = selectedReceiver.firmware;
+    document.getElementById('info-channel').textContent = selectedReceiver.channel;
+    document.getElementById('info-leds').textContent = selectedReceiver.leds;
+    document.getElementById('info-brightness').textContent = selectedReceiver.brightness;
+    document.getElementById('info-uptime').textContent = formatUptime(selectedReceiver.uptime);
+    document.getElementById('info-heap').textContent = formatBytes(selectedReceiver.heap);
+    document.getElementById('info-mode').textContent = selectedReceiver.mode;
+    
+    // Update input values
+    document.getElementById('input-leds').value = selectedReceiver.leds;
+    document.getElementById('input-brightness').value = selectedReceiver.brightness;
+    document.getElementById('brightness-preview').textContent = selectedReceiver.brightness;
+    
+    // Generate group buttons
+    renderGroupButtons();
+    
+    // Close any open edit rows
+    document.querySelectorAll('.edit-row').forEach(el => el.classList.remove('active'));
+    
+    // Show modal
+    document.getElementById('modal-overlay').classList.add('active');
+    
+    // Start stats automatically
+    startStats();
+    
+    showToast(`Connected to ${mac.slice(-8)}`, 'success');
+}
+
+function closeModal() {
+    // Stop stats
+    stopStats();
+    
+    // Hide modal
+    document.getElementById('modal-overlay').classList.remove('active');
+    
+    selectedReceiver = null;
+}
+
+function renderGroupButtons() {
+    const grid = document.getElementById('group-grid');
+    grid.innerHTML = '';
+    
+    for (let i = 0; i < 10; i++) {
+        const btn = document.createElement('button');
+        btn.className = 'group-btn' + (selectedReceiver?.group === i ? ' active' : '');
+        btn.textContent = i;
+        btn.onclick = () => assignGroup(i);
+        grid.appendChild(btn);
+    }
+}
+
+// ===== STATS =====
+function startStats() {
+    // Initial values
+    document.getElementById('stat-packets').textContent = '--';
+    document.getElementById('stat-rssi').textContent = '--';
+    
+    // Simulate stats every second
+    statsInterval = setInterval(() => {
+        if (!selectedReceiver) return;
+        document.getElementById('stat-packets').textContent = Math.floor(115 + Math.random() * 25);
+        document.getElementById('stat-rssi').textContent = Math.floor(selectedReceiver.rssi - 5 + Math.random() * 10);
+    }, 1000);
+    
+    // First update after 500ms
+    setTimeout(() => {
+        if (selectedReceiver) {
+            document.getElementById('stat-packets').textContent = Math.floor(115 + Math.random() * 25);
+            document.getElementById('stat-rssi').textContent = selectedReceiver.rssi;
+        }
+    }, 500);
+}
+
+function stopStats() {
+    if (statsInterval) {
+        clearInterval(statsInterval);
+        statsInterval = null;
+    }
+}
+
+// ===== EDITABLE FIELDS =====
+function toggleEdit(field) {
+    const editRow = document.getElementById('edit-' + field);
+    const isActive = editRow.classList.contains('active');
+    
+    // Close all edit rows
+    document.querySelectorAll('.edit-row').forEach(el => el.classList.remove('active'));
+    
+    // Toggle current
+    if (!isActive) {
+        editRow.classList.add('active');
+    }
+}
+
+function updateBrightnessPreview() {
+    document.getElementById('brightness-preview').textContent = 
+        document.getElementById('input-brightness').value;
+}
+
+function setLedCount() {
+    const value = parseInt(document.getElementById('input-leds').value);
+    if (value < 1 || value > 300) {
+        showToast('LED count must be 1-300', 'error');
+        return;
+    }
+    
+    selectedReceiver.leds = value;
+    document.getElementById('info-leds').textContent = value;
+    document.getElementById('edit-leds').classList.remove('active');
+    showToast(`LED count → ${value} (restart required)`, 'success');
+}
+
+function setBrightness() {
+    const value = parseInt(document.getElementById('input-brightness').value);
+    
+    selectedReceiver.brightness = value;
+    document.getElementById('info-brightness').textContent = value;
+    document.getElementById('edit-brightness').classList.remove('active');
+    showToast(`Brightness → ${value}`, 'success');
+}
+
+// ===== ACTIONS =====
+function scanReceivers() {
+    showToast('🔍 Scanning...', 'info');
+    setTimeout(() => {
+        renderReceivers();
+        showToast(`Found ${mockReceivers.length} receivers`, 'success');
+    }, 800);
+}
+
+function updateAllFirmware() {
+    showToast('🔄 Updating all...', 'info');
+}
+
+function sendPanic() {
+    showToast('🚨 PANIC - All OFF', 'error');
+}
+
+function getReceiverInfo() {
+    showToast('ℹ️ Refreshing info...', 'info');
+}
+
+function scanChannels() {
+    showToast('📶 Scanning channels...', 'info');
+}
+
+function updateFirmware() {
+    showToast('🔄 Starting update...', 'info');
+}
+
+function saveConfig() {
+    showToast('💾 Config saved to EEPROM', 'success');
+}
+
+function restartReceiver() {
+    showToast('🔁 Restarting...', 'info');
+    setTimeout(() => closeModal(), 1000);
+}
+
+function assignGroup(group) {
+    if (!selectedReceiver) return;
+    
+    selectedReceiver.group = group;
+    renderGroupButtons();
+    showToast(`Group → ${group}`, 'success');
+}
+
+// ===== UTILITIES =====
+function formatUptime(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+function formatBytes(bytes) {
+    return (bytes / 1024).toFixed(1) + ' KB';
+}
+
+function showToast(message, type = 'info') {
+    const toast = document.getElementById('toast');
+    toast.textContent = message;
+    toast.className = 'toast ' + type + ' show';
+    
+    setTimeout(() => {
+        toast.classList.remove('show');
+    }, 2500);
+}
+
+// ===== INIT =====
+document.addEventListener('DOMContentLoaded', () => {
+    renderReceivers();
+});
+
+// Close modal on escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && selectedReceiver) {
+        closeModal();
+    }
+});
+    </script>
+</body>
+</html>

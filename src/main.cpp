@@ -1,5 +1,6 @@
-#define VERSION 68 // numéro de version pour m'y retrouver pendant le développement
-#define VERSION_DATE "2025-11-26" // date de la version
+#define VERSION 70 // numéro de version pour m'y retrouver pendant le développement
+#define VERSION_DATE "2025-11-27" // date de la version
+#define VERSION_TIMESTAMP __DATE__ " " __TIME__  // Timestamp de compilation
 #define BUTTON_PRESENT false
 
 // ========== SYSTÈME DE DÉBOGAGE ==========
@@ -81,7 +82,8 @@ Le numéro de groupe est enregistré en EEPROM
 #define BUTTONPIN D1       // on définit le pin positif du bouton (il s'agit d'un pullup, quand le bouton est relevé, la valeur du pin est HIGH, quand le bouton est enfoncé, le contact au GND est fait et la valeur est donc LOW)
 #define BUTTONGROUNDPIN D5 // pour faciliter le montage, on utilise une pin pour fournir le GND au bouton
 
-#define MAXLEDLENGTH 144  // longueur du strip led attention! version 2m de longueur!! remettre à 144 pour la version 1m
+#define MAXLEDLENGTH 300  // Taille MAX des buffers (capacité maximale, ne pas changer!)
+                          // Le nombre de LEDs effectivement utilisé est dans ledCount (chargé depuis EEPROM)
                           
                           // !!!  QUAND LE STRIP LED EST ALIMENTÉ PAR L'ESP (en cours de programmation, par exemple), NE PAS ALLUMER PLUS D'UNE DIZAINE DE LEDS !!!
                           
@@ -164,6 +166,7 @@ Le numéro de groupe est enregistré en EEPROM
 #define EEPROM_ADDR_SETUP_TUBE      8
 #define EEPROM_ADDR_OTA_PARAMS      12
 #define EEPROM_ADDR_DETECTED_CHANNEL 98
+#define EEPROM_ADDR_LED_COUNT       100  // uint16_t (2 bytes)
 
 #include <FastLED.h>
 
@@ -273,6 +276,7 @@ bool identifyActive = false;             // Mode identification actif
 unsigned long identifyEndTime = 0;       // Fin du mode identification
 uint8_t scanResultsPerChannel[14] = {0}; // Résultats du scan (canaux 1-13, index 0 non utilisé)
 uint8_t scanBestChannel = 0;             // Meilleur canal trouvé lors du scan
+uint16_t ledCount = 144;                 // Nombre de LEDs effectivement utilisé (chargé depuis EEPROM au démarrage)
 // ========== FIN VARIABLES COMMANDES AVANCÉES ==========
 // ========== FIN VARIABLES SCAN CANAL WIFI ==========
 
@@ -305,7 +309,7 @@ void displayRemoteConfigPattern() {
       // État allumé : pattern rouge/blanc alternant toutes les 10 LEDs
       // LEDs 0-9 blancs, 10-19 rouges, 20-29 blancs, 30-39 rouges, etc.
       
-      for (int i = 0; i < MAXLEDLENGTH; i++) {
+      for (int i = 0; i < ledCount; i++) {
         int group = i / 10; // Groupe de 10 LEDs (0, 1, 2, 3...)
         if (group % 2 == 0) {
           leds[i] = CRGB::White; // Groupes pairs : blanc
@@ -533,8 +537,8 @@ uint8_t scanForChannel() {
     
     // Indication visuelle : allumer progressivement les LEDs bleues
     FastLED.clear();
-    int ledCount = (channel <= MAXLEDLENGTH) ? channel : MAXLEDLENGTH;
-    for (int i = 0; i < ledCount; i++) {
+    int numLedsToShow = (channel <= ledCount) ? channel : ledCount;
+    for (int i = 0; i < numLedsToShow; i++) {
       leds[i] = CRGB::Blue;
     }
     FastLED.show();
@@ -617,7 +621,7 @@ uint8_t scanForChannel() {
     // Flash vert rapide (3 clignotements)
     for (int i = 0; i < 3; i++) {
       FastLED.clear();
-      for (int j = 0; j < min(10, MAXLEDLENGTH); j++) {
+      for (int j = 0; j < min(10, (int)ledCount); j++) {
         leds[j] = CRGB::Green;
       }
       FastLED.show();
@@ -740,7 +744,7 @@ void executeOTAUpdate() {
     
     // Indication visuelle : une LED bleue qui progresse
     FastLED.clear();
-    for (int j = 0; j < min(wifiTimeout, MAXLEDLENGTH); j++) {
+    for (int j = 0; j < min(wifiTimeout, (int)ledCount); j++) {
       leds[j] = CRGB::Blue;
     }
     FastLED.show();
@@ -752,7 +756,7 @@ void executeOTAUpdate() {
     // Indication visuelle : clignotement rouge
     for (int i = 0; i < 10; i++) {
       FastLED.clear();
-      for (int j = 0; j < min(5, MAXLEDLENGTH); j++) {
+      for (int j = 0; j < min(5, (int)ledCount); j++) {
         leds[j] = CRGB::Red;
       }
       FastLED.show();
@@ -777,7 +781,7 @@ void executeOTAUpdate() {
   
   // Indication visuelle : vert fixe pendant le téléchargement
   FastLED.clear();
-  for (int j = 0; j < MAXLEDLENGTH; j++) {
+  for (int j = 0; j < ledCount; j++) {
     leds[j] = CRGB::Green;
   }
   FastLED.show();
@@ -798,7 +802,7 @@ void executeOTAUpdate() {
       // Indication visuelle : clignotement rouge rapide
       for (int i = 0; i < 20; i++) {
         FastLED.clear();
-        for (int j = 0; j < MAXLEDLENGTH; j++) {
+        for (int j = 0; j < ledCount; j++) {
           leds[j] = CRGB::Red;
         }
         FastLED.show();
@@ -814,7 +818,7 @@ void executeOTAUpdate() {
       
       // Indication visuelle : orange fixe 2 secondes
       FastLED.clear();
-      for (int j = 0; j < MAXLEDLENGTH; j++) {
+      for (int j = 0; j < ledCount; j++) {
         leds[j] = CRGB::Orange;
       }
       FastLED.show();
@@ -826,7 +830,7 @@ void executeOTAUpdate() {
       
       // Indication visuelle : blanc fixe 1 seconde puis redémarrage
       FastLED.clear();
-      for (int j = 0; j < MAXLEDLENGTH; j++) {
+      for (int j = 0; j < ledCount; j++) {
         leds[j] = CRGB::White;
       }
       FastLED.show();
@@ -982,11 +986,10 @@ void sendInfoResponse() {
   
   // data[4-9] : MAC (déjà rempli par prepareResponsePacket)
   responsePacket.data[10] = setupTubeNumber;           // Groupe actuel
-  responsePacket.data[11] = VERSION;                   // Version firmware
+  responsePacket.data[11] = VERSION;                   // Version firmware (legacy, pour compatibilité)
   responsePacket.data[12] = detectedChannel;           // Canal WiFi actuel
   
-  // Nombre de LEDs (uint16_t en little-endian)
-  uint16_t ledCount = LEDNUMBER;
+  // Nombre de LEDs (uint16_t en little-endian) - utilise la variable globale ledCount
   responsePacket.data[13] = ledCount & 0xFF;
   responsePacket.data[14] = (ledCount >> 8) & 0xFF;
   
@@ -1017,10 +1020,18 @@ void sendInfoResponse() {
   // Stats streaming actif
   responsePacket.data[26] = statsStreamActive ? 1 : 0;
   
+  // Timestamp du firmware (max 24 caractères) - data[27] à data[50]
+  // Format: "Nov 27 2025 14:32:15"
+  const char* timestamp = VERSION_TIMESTAMP;
+  uint8_t timestampLen = strlen(timestamp);
+  if (timestampLen > 24) timestampLen = 24;
+  responsePacket.data[27] = timestampLen;  // Longueur du timestamp
+  memcpy(&responsePacket.data[28], timestamp, timestampLen);
+  
   sendResponsePacket(&responsePacket);
   
-  Serial.printf("Info envoyée | Groupe:%d | Canal:%d | LEDs:%d | RSSI:%d\n",
-                setupTubeNumber, detectedChannel, LEDNUMBER, lastRSSI);
+  Serial.printf("Info envoyée | Groupe:%d | Canal:%d | LEDs:%d | RSSI:%d | FW:%s\n",
+                setupTubeNumber, detectedChannel, ledCount, lastRSSI, VERSION_TIMESTAMP);
   Serial.println("========== FIN ENVOI INFO RESPONSE ==========");
 }
 
@@ -1209,7 +1220,7 @@ void performChannelScanWithStats() {
   
   // Afficher le résultat
   if (scanBestChannel > 0) {
-    for (int i = 0; i < min((int)scanBestChannel, LEDNUMBER); i++) {
+    for (int i = 0; i < min((int)scanBestChannel, (int)ledCount); i++) {
       leds[i] = CRGB::Green;
     }
   } else {
@@ -1232,7 +1243,7 @@ void handleIdentifyMode() {
   if (millis() > identifyEndTime) {
     identifyActive = false;
     // Éteindre les LEDs
-    fill_solid(leds, LEDNUMBER, CRGB::Black);
+    fill_solid(leds, ledCount, CRGB::Black);
     FastLED.show();
     Serial.println("Fin mode identification");
     return;
@@ -1244,7 +1255,7 @@ void handleIdentifyMode() {
   
   if (millis() - lastBlink > 200) {
     blinkOn = !blinkOn;
-    fill_solid(leds, LEDNUMBER, blinkOn ? CRGB::White : CRGB::Black);
+    fill_solid(leds, ledCount, blinkOn ? CRGB::White : CRGB::Black);
     FastLED.show();
     lastBlink = millis();
   }
@@ -1268,15 +1279,20 @@ void handleNewCommand(uint8_t cmd, uint8_t* data, uint8_t len) {
       break;
       
     case SET_LED_COUNT_CMD:
-      // data[4-5] contient le nouveau nombre de LEDs (uint16_t)
-      if (len >= 6) {
-        uint16_t newLedCount = data[4] | (data[5] << 8);
+      // data[10-11] contient le nouveau nombre de LEDs (uint16_t en little-endian)
+      if (len >= 12) {
+        uint16_t newLedCount = data[10] | (data[11] << 8);
         if (newLedCount > 0 && newLedCount <= MAXLEDLENGTH) {
-          // Note: LEDNUMBER est un #define, donc on ne peut pas le modifier dynamiquement
-          // On envoie un ACK pour confirmer la réception
-          Serial.printf("Demande changement LEDs: %d (non implémenté dynamiquement)\n", newLedCount);
-          sendAckResponse(SET_LED_COUNT_CMD, 1);  // 1 = non supporté
+          // Sauvegarder en EEPROM et redémarrer pour appliquer
+          EEPROM.write(EEPROM_ADDR_LED_COUNT, newLedCount & 0xFF);
+          EEPROM.write(EEPROM_ADDR_LED_COUNT + 1, (newLedCount >> 8) & 0xFF);
+          EEPROM.commit();
+          Serial.printf("Nombre de LEDs changé: %d -> Sauvegardé en EEPROM, redémarrage...\n", newLedCount);
+          sendAckResponse(SET_LED_COUNT_CMD, 0);  // 0 = OK
+          delay(500);
+          ESP.restart();
         } else {
+          Serial.printf("Nombre de LEDs invalide: %d (max: %d)\n", newLedCount, MAXLEDLENGTH);
           sendAckResponse(SET_LED_COUNT_CMD, 2);  // 2 = valeur invalide
         }
       }
@@ -1297,8 +1313,8 @@ void handleNewCommand(uint8_t cmd, uint8_t* data, uint8_t len) {
       break;
       
     case SET_BRIGHTNESS_CMD:
-      if (len >= 5) {
-        maxBrightness = data[4];
+      if (len >= 11) {
+        maxBrightness = data[10];
         FastLED.setBrightness(maxBrightness);
         Serial.printf("Luminosité max définie: %d\n", maxBrightness);
         sendAckResponse(SET_BRIGHTNESS_CMD, 0);
@@ -1316,8 +1332,12 @@ void handleNewCommand(uint8_t cmd, uint8_t* data, uint8_t len) {
       // Sauvegarder la config actuelle en EEPROM
       EEPROM.write(EEPROM_ADDR_SETUP_TUBE, setupTubeNumber);
       EEPROM.write(EEPROM_ADDR_DETECTED_CHANNEL, detectedChannel);
+      // Sauvegarder ledCount (uint16_t = 2 bytes)
+      EEPROM.write(EEPROM_ADDR_LED_COUNT, ledCount & 0xFF);
+      EEPROM.write(EEPROM_ADDR_LED_COUNT + 1, (ledCount >> 8) & 0xFF);
       EEPROM.commit();
-      Serial.println("Configuration sauvegardée en EEPROM");
+      Serial.printf("Configuration sauvegardée en EEPROM (groupe=%d, canal=%d, leds=%d)\n", 
+                    setupTubeNumber, detectedChannel, ledCount);
       sendAckResponse(SAVE_CONFIG_CMD, 0);
       break;
       
@@ -1404,7 +1424,7 @@ void handleRemoteSetup() {
   FastLED.clear();
   
   // LEDs 100+ en blanc pour signaler la sélection
-  for (int j = 100; j < MAXLEDLENGTH; j++) {
+  for (int j = 100; j < ledCount; j++) {
     leds[j] = CRGB::White;
   }
   
@@ -1412,12 +1432,12 @@ void handleRemoteSetup() {
   if (blinkState) {
     if (setupTubeNumber == 0) {
       // Groupe 0 : première LED en rouge
-      if (0 < MAXLEDLENGTH) {
+      if (0 < ledCount) {
         leds[0] = CRGB::Red;
       }
     } else {
       // Groupe n : n LEDs vertes espacées de 10
-      for (int j = 0; j < setupTubeNumber && (j * 10) < min(100, MAXLEDLENGTH); j++) {
+      for (int j = 0; j < setupTubeNumber && (j * 10) < min(100, (int)ledCount); j++) {
         leds[j * 10] = CRGB::Green;
       }
     }
@@ -1567,20 +1587,20 @@ void OnDataRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len)
       
       // ========== FIN GESTION COMMANDES SPÉCIALES ==========
 
-      // IGNORER les paquets DMX normaux si en mode configuration à distance
-      if (remoteConfigActive) {
-        return; // Ne pas traiter les données DMX pendant la configuration
-      }
-
       // Traitement normal des paquets DMX (si data[3] != OTA_UPDATE_CMD)
       uint8_t packetNumber = incomingDMXPacket.blockNumber;
       if (packetNumber < 4)
       {
-        statsDMXPackets++; // Incrémenter le compteur DMX
+        statsDMXPackets++; // Incrémenter le compteur DMX (toujours, même en mode config)
         statsStreamPacketCount++; // Incrémenter le compteur pour stats streaming
-        for (int i = 0; i < 128; i++)
-        {
-          dmxChannels[(packetNumber * 128) + i] = incomingDMXPacket.dmxvalues[i];
+        
+        // IGNORER l'application des valeurs DMX si en mode configuration à distance
+        // mais on a quand même compté le paquet pour les statistiques
+        if (!remoteConfigActive) {
+          for (int i = 0; i < 128; i++)
+          {
+            dmxChannels[(packetNumber * 128) + i] = incomingDMXPacket.dmxvalues[i];
+          }
         }
       }
     } else {
@@ -1645,8 +1665,8 @@ void flickering(uint8_t dmx1, uint8_t dmx2, uint8_t dmx3, uint8_t dmx4, uint8_t 
   // 1) Choix des canaux RGB selon "couleur unie (0)" ou "par groupe (1)"
 
   // 2) Calcul des longueurs mini/maxi pour la construction de segments
-  int minimumSegmentLength = max(1, (dmx2* MAXLEDLENGTH) / 255);
-  int maximumSegmentLength = max(1, (dmx3 * MAXLEDLENGTH) / 255);
+  int minimumSegmentLength = max(1, (dmx2* (int)ledCount) / 255);
+  int maximumSegmentLength = max(1, (dmx3 * (int)ledCount) / 255);
   // Si jamais le max < min, on les inverse
   if (maximumSegmentLength < minimumSegmentLength) {
     int temp = maximumSegmentLength;
@@ -1663,11 +1683,11 @@ void flickering(uint8_t dmx1, uint8_t dmx2, uint8_t dmx3, uint8_t dmx4, uint8_t 
 
     // On construit un nouveau "pattern" de segments allumés/éteints dans flickerLeds[]
     bool allumeSegment = (random(2) == 1);  // random(2) => 0 ou 1
-    for (int j = 0; j < MAXLEDLENGTH; ) {
+    for (int j = 0; j < ledCount; ) {
       int segLen = random(minimumSegmentLength, maximumSegmentLength);
-      // On s’assure de ne pas dépasser la fin du strip
-      if (j + segLen > MAXLEDLENGTH) {
-        segLen = MAXLEDLENGTH - j; 
+      // On s'assure de ne pas dépasser la fin du strip
+      if (j + segLen > ledCount) {
+        segLen = ledCount - j; 
       }
 
       // On remplit segLen pixels
@@ -1708,7 +1728,7 @@ void flickering(uint8_t dmx1, uint8_t dmx2, uint8_t dmx3, uint8_t dmx4, uint8_t 
 
     if (isOn) {
       // On copie le pattern calculé dans flickerLeds[]
-      for (int i = 0; i < MAXLEDLENGTH; i++) {
+      for (int i = 0; i < ledCount; i++) {
         leds[i] = flickerLeds[i];
       }
     } else {
@@ -1764,7 +1784,7 @@ if (setupMode != 1) {
   {
   case 0: // Une seule couleur pour tous les pixels et tous les groupes. Les canaux 2 3 4 représentent les composantes R G B
 
-    for (int j = 0; j < MAXLEDLENGTH; j++)
+    for (int j = 0; j < ledCount; j++)
     {
       leds[j].r = dmxChannels[1];
       leds[j].g = dmxChannels[2];
@@ -1788,8 +1808,8 @@ case 1: // Mode Rainbow défilant avec contrôle du décalage, de la densité de
     uint8_t deltaHue = map(colorDensity, 0, 255, 1, 50); // Plus colorDensity est élevé, plus les couleurs sont espacées
 
     // Générer un arc-en-ciel avec la densité contrôlée
-    fill_rainbow(leds, MAXLEDLENGTH, (hueOffset + (setupTubeNumber * dmxChannels[1])) % 255, deltaHue);
-    //fill_rainbow(leds, MAXLEDLENGTH, hueOffset+(setupTubeNumber*dmxChannels[1]), deltaHue);
+    fill_rainbow(leds, ledCount, (hueOffset + (setupTubeNumber * dmxChannels[1])) % 255, deltaHue);
+    //fill_rainbow(leds, ledCount, hueOffset+(setupTubeNumber*dmxChannels[1]), deltaHue);
 
     // Ajuster l'offset en fonction de la vitesse
     hueOffset += map(rainbowSpeed, 0, 255, -5, 5); // Contrôle de la vitesse et de la direction (-5 à 5)
@@ -1809,10 +1829,10 @@ case 2: // Mode Rainbow avec intensité ajustable
     uint8_t deltaHue = map(colorDensity, 0, 255, 1, 50); // Plus colorDensity est élevé, plus les couleurs sont espacées
 
     // Générer un arc-en-ciel avec la densité contrôlée
-    fill_rainbow(leds, MAXLEDLENGTH, (hueOffset + (setupTubeNumber * dmxChannels[1])) % 255, deltaHue);
+    fill_rainbow(leds, ledCount, (hueOffset + (setupTubeNumber * dmxChannels[1])) % 255, deltaHue);
 
-    // Appliquer l’intensité générale
-    for (int i = 0; i < MAXLEDLENGTH; i++) {
+    // Appliquer l'intensité générale
+    for (int i = 0; i < ledCount; i++) {
         leds[i].fadeLightBy(255 - intensity); // Réduire la luminosité en fonction de l'intensité
     }
 
@@ -1846,7 +1866,7 @@ case 3: // Mode scintillement aléatoire
         lastUpdateTime = millis();
 
         // Désactiver un pixel aléatoire (si nécessaire)
-        for (int i = 0; i < MAXLEDLENGTH; i++) {
+        for (int i = 0; i < ledCount; i++) {
             if (pixelStates[i] && random(0, 100) < 50) { // 50% de probabilité de s'éteindre
                 pixelStates[i] = false;
             }
@@ -1854,14 +1874,14 @@ case 3: // Mode scintillement aléatoire
 
         // Activer de nouveaux pixels aléatoires
         int activePixels = 0;
-        for (int i = 0; i < MAXLEDLENGTH; i++) {
+        for (int i = 0; i < ledCount; i++) {
             if (pixelStates[i]) {
                 activePixels++;
             }
         }
 
         while (activePixels < numPixels) {
-            int randomPixel = random(0, MAXLEDLENGTH);
+            int randomPixel = random(0, ledCount);
             if (!pixelStates[randomPixel]) {
                 pixelStates[randomPixel] = true;
                 activePixels++;
@@ -1870,7 +1890,7 @@ case 3: // Mode scintillement aléatoire
     }
 
     // Appliquer les couleurs
-    for (int i = 0; i < MAXLEDLENGTH; i++) {
+    for (int i = 0; i < ledCount; i++) {
         if (pixelStates[i]) {
             leds[i].r = pixelColor.r;
             leds[i].g = pixelColor.g;
@@ -1911,7 +1931,7 @@ case 4: // Mode scintillement progressif
         lastUpdateTime = millis();
 
         // Désactiver un pixel aléatoire (si nécessaire)
-        for (int i = 0; i < MAXLEDLENGTH; i++) {
+        for (int i = 0; i < ledCount; i++) {
             if (pixelTargets[i] == 1 && random(0, 100) < 50) { // 50% de probabilité de passer à l'état "éteint"
                 pixelTargets[i] = 0;
             }
@@ -1919,14 +1939,14 @@ case 4: // Mode scintillement progressif
 
         // Activer de nouveaux pixels aléatoires
         int activePixels = 0;
-        for (int i = 0; i < MAXLEDLENGTH; i++) {
+        for (int i = 0; i < ledCount; i++) {
             if (pixelTargets[i] == 1) {
                 activePixels++;
             }
         }
 
         while (activePixels < numPixels) {
-            int randomPixel = random(0, MAXLEDLENGTH);
+            int randomPixel = random(0, ledCount);
             if (pixelTargets[randomPixel] == 0) {
                 pixelTargets[randomPixel] = 1; // Passer à l'état "allumé"
                 activePixels++;
@@ -1934,7 +1954,7 @@ case 4: // Mode scintillement progressif
         }
     }
 
-  for (int i = 0; i < MAXLEDLENGTH; i++) {
+  for (int i = 0; i < ledCount; i++) {
     if (pixelTargets[i] == 1) {
         pixelIntensities[i] = min(pixelIntensities[i] + FADE_SPEED, 1.0); // Augmenter progressivement
     } else {
@@ -1944,7 +1964,7 @@ case 4: // Mode scintillement progressif
 
 
     // Appliquer les couleurs en fonction des intensités
-    for (int i = 0; i < MAXLEDLENGTH; i++) {
+    for (int i = 0; i < ledCount; i++) {
         leds[i].r = pixelColor.r * pixelIntensities[i];
         leds[i].g = pixelColor.g * pixelIntensities[i];
         leds[i].b = pixelColor.b * pixelIntensities[i];
@@ -1979,7 +1999,7 @@ case 5: // Mode scintillement progressif par groupes
         lastUpdateTime = millis();
 
         // Désactiver un groupe aléatoire (si nécessaire)
-        for (int i = 0; i < MAXLEDLENGTH; i++) {
+        for (int i = 0; i < ledCount; i++) {
             if (groupTargets[i] == 1 && random(0, 100) < 50) { // 50% de probabilité de passer à l'état "éteint"
                 groupTargets[i] = 0;
             }
@@ -1987,14 +2007,14 @@ case 5: // Mode scintillement progressif par groupes
 
         // Activer de nouveaux groupes aléatoires
         int activeGroups = 0;
-        for (int i = 0; i < MAXLEDLENGTH; i++) {
+        for (int i = 0; i < ledCount; i++) {
             if (groupTargets[i] == 1) {
                 activeGroups++;
             }
         }
 
         while (activeGroups < numGroups) {
-            int randomGroupStart = random(0, MAXLEDLENGTH);
+            int randomGroupStart = random(0, ledCount);
             int groupLength = random(1, 6); // Longueur aléatoire entre 1 et 5 pixels
 
             if (groupTargets[randomGroupStart] == 0) {
@@ -2006,7 +2026,7 @@ case 5: // Mode scintillement progressif par groupes
     }
 
     // Mettre à jour les intensités pour chaque groupe
-    for (int i = 0; i < MAXLEDLENGTH; i++) {
+    for (int i = 0; i < ledCount; i++) {
         if (groupTargets[i] == 1) {
             groupIntensities[i] = min(groupIntensities[i] + FADE_SPEED, 1.0); // Augmenter progressivement
         } else {
@@ -2015,7 +2035,7 @@ case 5: // Mode scintillement progressif par groupes
 
         // Appliquer les couleurs pour les pixels dans chaque groupe
         for (int j = 0; j < groupLengths[i]; j++) {
-            int pixelIndex = (i + j) % MAXLEDLENGTH; // Gérer les débordements
+            int pixelIndex = (i + j) % ledCount; // Gérer les débordements
             leds[pixelIndex].r = pixelColor.r * groupIntensities[i];
             leds[pixelIndex].g = pixelColor.g * groupIntensities[i];
             leds[pixelIndex].b = pixelColor.b * groupIntensities[i];
@@ -2033,7 +2053,7 @@ case 5: // Mode scintillement progressif par groupes
 
   case 6: // Chaque groupe a une couleur unique pour tous ses pixels. Cette couleur est définie par trois canaux représentant ses valeurs RGB. 
          // Groupe 0 : RGB = 2 3 4, groupe 1 : RGB = 5 6 7, etc. 
-    for (int j = 0; j < MAXLEDLENGTH * 3; j += 3)
+    for (int j = 0; j < ledCount * 3; j += 3)
     {
       leds[j / 3].r = dmxChannels[ir];
       leds[j / 3].g = dmxChannels[ig];
@@ -2115,7 +2135,7 @@ break;
         lastOffset += (onLength + offLength); // Gérer les valeurs négatives
     }
 
-    for (int j = 0; j < MAXLEDLENGTH; j++) {
+    for (int j = 0; j < ledCount; j++) {
         double fadeFactor = 1.0; // Par défaut, pas d'atténuation
 
         // Calcul de la position continue avec offset, incluant le décalage par groupe
@@ -2296,6 +2316,17 @@ void setup()
   setupAddress = EEPROM.read(EEPROM_ADDR_SETUP_ADDRESS);
   setupMode = EEPROM.read(EEPROM_ADDR_SETUP_MODE);
   setupTubeNumber = EEPROM.read(EEPROM_ADDR_SETUP_TUBE);
+  
+  // Charger le nombre de LEDs (uint16_t = 2 bytes)
+  uint16_t savedLedCount = EEPROM.read(EEPROM_ADDR_LED_COUNT) | (EEPROM.read(EEPROM_ADDR_LED_COUNT + 1) << 8);
+  if (savedLedCount > 0 && savedLedCount <= MAXLEDLENGTH) {
+    ledCount = savedLedCount;
+    Serial.printf("Nombre de LEDs chargé depuis EEPROM: %d\n", ledCount);
+  } else {
+    ledCount = 144;  // Valeur par défaut (ruban standard)
+    Serial.printf("Nombre de LEDs par défaut: %d\n", ledCount);
+  }
+  
   if ((setupAddress < 1) || (setupAddress > 512))
     setupAddress = 1;
   if ((setupMode < 1) || (setupMode > 255))
