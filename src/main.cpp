@@ -116,6 +116,7 @@ Le numéro de groupe est enregistré en EEPROM
 #define GET_INFO_CMD           0xE0  // Demande toutes les infos du récepteur
 #define GET_CHANNEL_CMD        0xE1  // Demande le canal WiFi actuel
 #define START_SCAN_CMD         0xE2  // Lancer un scan des canaux
+#define SET_CHANNEL_CMD        0xE3  // Définir le canal WiFi actif
 #define SET_LED_COUNT_CMD      0xE4  // Définir le nombre de LEDs
 #define START_STATS_CMD        0xE5  // Démarrer envoi stats périodiques
 #define STOP_STATS_CMD         0xE6  // Arrêter envoi stats périodiques
@@ -124,6 +125,7 @@ Le numéro de groupe est enregistré en EEPROM
 #define SAVE_CONFIG_CMD        0xE9  // Sauvegarder config en EEPROM
 #define IDENTIFY_CMD           0xEA  // Faire clignoter pour identifier
 #define PING_CMD               0xEB  // Test de connectivité
+#define SET_STATS_SERIAL_CMD   0xEC  // Activer/désactiver stats sur serial
 
 // Réponses (récepteur -> émetteur)
 #define RESPONSE_INFO_CMD      0xD0  // Réponse avec toutes les infos
@@ -141,6 +143,11 @@ Le numéro de groupe est enregistré en EEPROM
 
 #include <ESP8266HTTPClient.h>
 #include <ESP8266httpUpdate.h>
+
+// user_interface.h pour les fonctions WiFi bas niveau
+extern "C" {
+  #include "user_interface.h"
+}
 
 
 // #include <DNSServer.h>
@@ -256,7 +263,7 @@ unsigned long statsMACPackets = 0;   // Compteur de paquets MAC (request/respons
 unsigned long statsSETUPPackets = 0;  // Compteur de paquets SETUP
 unsigned long statsInvalidPackets = 0; // Compteur de paquets invalides
 unsigned long statsTotalPackets = 0; // Compteur total de paquets
-int lastRSSI = 0;                    // RSSI de la dernière trame reçue
+int lastRSSI = 0;                    // RSSI (approximatif sur ESP8266 - limitation hardware)
 // ========== FIN VARIABLES STATISTIQUES ==========
 
 // ========== VARIABLES POUR SCAN CANAL WIFI ==========
@@ -268,6 +275,7 @@ bool isScanning = false;           // Flag pour éviter les scans multiples simu
 
 // ========== VARIABLES POUR COMMANDES AVANCÉES ==========
 bool statsStreamActive = false;          // Envoi périodique de stats activé
+bool statsSerialEnabled = false;        // Affichage des stats sur le port série (désactivé par défaut)
 unsigned long lastStatsStreamTime = 0;   // Dernier envoi de stats périodiques
 uint32_t statsStreamPacketCount = 0;     // Paquets reçus depuis dernier envoi stats
 uint8_t maxBrightness = 255;             // Luminosité maximale (0-255)
@@ -904,7 +912,8 @@ void sendMACResponse() {
     // Vérifier d'abord si le peer existe déjà (évite l'erreur -8)
     if (!esp_now_is_peer_exist(senderMacAddress)) {
       // Ajouter l'émetteur comme peer pour pouvoir lui répondre directement
-      int peerResult = esp_now_add_peer(senderMacAddress, ESP_NOW_ROLE_COMBO, 1, NULL, 0);
+      // Utiliser detectedChannel au lieu de canal 1 en dur
+      int peerResult = esp_now_add_peer(senderMacAddress, ESP_NOW_ROLE_COMBO, detectedChannel, NULL, 0);
       if (peerResult != 0) {
         Serial.printf("Erreur ajout peer émetteur: %d\n", peerResult);
         // En cas d'erreur, fallback sur broadcast
@@ -924,13 +933,22 @@ void sendMACResponse() {
   }
   
   // Envoi du paquet AVANT l'indication visuelle
+  Serial.printf("Envoi réponse MAC sur canal %d vers ", detectedChannel);
+  if (targetAddress == broadcastAddress) {
+    Serial.println("BROADCAST");
+  } else {
+    Serial.printf("%02X:%02X:%02X:%02X:%02X:%02X\n", 
+                  targetAddress[0], targetAddress[1], targetAddress[2], 
+                  targetAddress[3], targetAddress[4], targetAddress[5]);
+  }
+  
   uint8_t result = esp_now_send(targetAddress, (uint8_t *) &responsePacket, sizeof(responsePacket));
   
   if (result == 0) {
     Serial.println("Adresse MAC envoyée avec succès");
     // Note: Indication visuelle supprimée pour éviter les conflits FastLED/ESP-NOW
   } else {
-    Serial.printf("Erreur envoi MAC: %d\n", result);
+    Serial.printf("Erreur envoi MAC: %d (canal actuel: %d)\n", result, wifi_get_channel());
   }
   
   Serial.println("========== FIN ENVOI ADRESSE MAC ==========");
@@ -1020,13 +1038,16 @@ void sendInfoResponse() {
   // Stats streaming actif
   responsePacket.data[26] = statsStreamActive ? 1 : 0;
   
-  // Timestamp du firmware (max 24 caractères) - data[27] à data[50]
+  // Stats serial enabled
+  responsePacket.data[27] = statsSerialEnabled ? 1 : 0;
+  
+  // Timestamp du firmware (max 24 caractères) - data[28] à data[51]
   // Format: "Nov 27 2025 14:32:15"
   const char* timestamp = VERSION_TIMESTAMP;
   uint8_t timestampLen = strlen(timestamp);
   if (timestampLen > 24) timestampLen = 24;
-  responsePacket.data[27] = timestampLen;  // Longueur du timestamp
-  memcpy(&responsePacket.data[28], timestamp, timestampLen);
+  responsePacket.data[28] = timestampLen;  // Longueur du timestamp
+  memcpy(&responsePacket.data[29], timestamp, timestampLen);
   
   sendResponsePacket(&responsePacket);
   
@@ -1278,6 +1299,42 @@ void handleNewCommand(uint8_t cmd, uint8_t* data, uint8_t len) {
       performChannelScanWithStats();
       break;
       
+    case SET_CHANNEL_CMD:
+      // data[10] contient le nouveau canal WiFi
+      if (len >= 11) {
+        uint8_t newChannel = data[10];
+        if (newChannel >= 1 && newChannel <= 13) {
+          Serial.printf("Commande SET_CHANNEL reçue: canal %d\n", newChannel);
+          
+          // Vérifier si le canal a changé
+          if (newChannel != detectedChannel) {
+            Serial.printf("Changement de canal: %d -> %d\n", detectedChannel, newChannel);
+            
+            // Sauvegarder le nouveau canal en EEPROM
+            saveDetectedChannel(newChannel);
+            
+            // Envoyer un ACK avant le redémarrage
+            sendAckResponse(SET_CHANNEL_CMD, 0);  // 0 = OK
+            delay(200);  // Petit délai pour que l'ACK parte
+            
+            // Redémarrer pour appliquer le nouveau canal
+            Serial.println("Redémarrage pour appliquer le nouveau canal...");
+            delay(500);
+            ESP.restart();
+          } else {
+            Serial.println("Canal identique, pas de changement nécessaire");
+            sendAckResponse(SET_CHANNEL_CMD, 0);  // 0 = OK
+          }
+        } else {
+          Serial.printf("Canal invalide: %d (doit être entre 1 et 13)\n", newChannel);
+          sendAckResponse(SET_CHANNEL_CMD, 2);  // 2 = valeur invalide
+        }
+      } else {
+        Serial.println("Paquet SET_CHANNEL trop court");
+        sendAckResponse(SET_CHANNEL_CMD, 1);  // 1 = erreur
+      }
+      break;
+      
     case SET_LED_COUNT_CMD:
       // data[10-11] contient le nouveau nombre de LEDs (uint16_t en little-endian)
       if (len >= 12) {
@@ -1350,6 +1407,17 @@ void handleNewCommand(uint8_t cmd, uint8_t* data, uint8_t len) {
       
     case PING_CMD:
       sendPongResponse();
+      break;
+      
+    case SET_STATS_SERIAL_CMD:
+      // data[10] contient 1 pour activer, 0 pour désactiver
+      if (len >= 11) {
+        statsSerialEnabled = (data[10] != 0);
+        Serial.printf("Stats serial: %s\n", statsSerialEnabled ? "ACTIVÉ" : "DÉSACTIVÉ");
+        sendAckResponse(SET_STATS_SERIAL_CMD, 0);
+      } else {
+        sendAckResponse(SET_STATS_SERIAL_CMD, 1);  // Erreur
+      }
       break;
       
     default:
@@ -1485,7 +1553,9 @@ void OnDataRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len)
   
   // Collecte des statistiques
   statsTotalPackets++;
-  lastRSSI = WiFi.RSSI(); // RSSI de la dernière trame
+  // RSSI approximatif (WiFi.RSSI() ne donne pas le RSSI du paquet ESP-NOW mais de la connexion STA)
+  // Sur ESP8266, il n'y a pas de moyen simple d'obtenir le RSSI des paquets ESP-NOW
+  lastRSSI = WiFi.RSSI();
   
   // Vérification de la taille d'un paquet DMX
   if (len == sizeof(struct_dmx_packet))
@@ -1512,11 +1582,14 @@ void OnDataRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len)
       if (incomingDMXPacket.data[3] == REQUEST_MAC_CMD)
       {
         statsMACPackets++;
-        Serial.println("Demande d'adresse MAC détectée !");
+        Serial.printf("Demande d'adresse MAC détectée ! (canal: %d)\n", wifi_get_channel());
         
         // Stocker l'adresse MAC de l'émetteur pour pouvoir lui répondre directement
         memcpy(senderMacAddress, mac, 6);
         hasSenderAddress = true;
+        
+        Serial.printf("Émetteur MAC: %02X:%02X:%02X:%02X:%02X:%02X\n", 
+                      mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
         
         sendMACResponse();
         return; // Sortir immédiatement après envoi de la réponse
@@ -1577,7 +1650,15 @@ void OnDataRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len)
         memcpy(senderMacAddress, mac, 6);
         hasSenderAddress = true;
         
-        // Vérifier si la commande est destinée à ce récepteur
+        // SET_CHANNEL_CMD est toujours en broadcast (0xFF dans data[4..9])
+        // Il faut la traiter même si isCommandForMe() retourne false
+        if (cmdCode == SET_CHANNEL_CMD) {
+          Serial.println("Commande SET_CHANNEL_CMD détectée (broadcast)");
+          handleNewCommand(cmdCode, incomingDMXPacket.data, sizeof(incomingDMXPacket.data));
+          return;
+        }
+        
+        // Pour les autres commandes, vérifier si elles sont destinées à ce récepteur
         if (isCommandForMe(incomingDMXPacket.data)) {
           handleNewCommand(cmdCode, incomingDMXPacket.data, sizeof(incomingDMXPacket.data));
         }
@@ -2235,24 +2316,29 @@ void setup()
   Serial.println("\nESP-Now Receiver");
   
   // ========== GESTION CANAL ESP-NOW ==========
-  // TOUJOURS scanner au démarrage pour s'assurer d'être sur le bon canal
-  // (le canal peut avoir changé si le routeur WiFi a redémarré ou si l'émetteur a changé de réseau)
-  uint8_t lastKnownChannel = loadDetectedChannel();
-  DEBUG_PRINTF("Dernier canal connu en EEPROM: %d\n", lastKnownChannel);
+  // Utiliser directement le canal sauvegardé en EEPROM (défini par diffusion depuis l'émetteur)
+  uint8_t savedChannel = loadDetectedChannel();
   
-  DEBUG_PRINTLN("Lancement du scan au démarrage...");
-  detectedChannel = scanForChannel();
-  
-  if (detectedChannel == 0) {
-    // Scan échoué, utiliser le dernier canal connu ou canal 1 par défaut
-    if (lastKnownChannel >= 1 && lastKnownChannel <= 13) {
-      Serial.printf("ATTENTION: Scan échoué, utilisation du dernier canal connu: %d\n", lastKnownChannel);
-      detectedChannel = lastKnownChannel;
-      wifi_set_channel(lastKnownChannel);
-    } else {
-      Serial.println("ATTENTION: Aucun canal détecté, utilisation du canal 1 par défaut");
+  if (savedChannel >= 1 && savedChannel <= 13) {
+    // Canal valide en EEPROM, l'utiliser directement
+    detectedChannel = savedChannel;
+    Serial.printf("Canal chargé depuis EEPROM: %d\n", detectedChannel);
+    wifi_set_channel(detectedChannel);
+  } else {
+    // Aucun canal valide en EEPROM, faire un scan rapide pour trouver l'émetteur
+    // (nécessaire pour la première utilisation ou si l'EEPROM a été effacée)
+    Serial.println("ATTENTION: Aucun canal valide en EEPROM, scan rapide pour trouver l'émetteur...");
+    detectedChannel = scanForChannel();
+    
+    if (detectedChannel == 0) {
+      // Scan échoué, utiliser le canal 1 par défaut
+      Serial.println("Scan échoué, utilisation du canal 1 par défaut");
       detectedChannel = 1;
       wifi_set_channel(1);
+      saveDetectedChannel(1); // Sauvegarder le canal par défaut
+    } else {
+      // Scan réussi, sauvegarder le canal trouvé
+      saveDetectedChannel(detectedChannel);
     }
   }
   
@@ -2269,6 +2355,9 @@ void setup()
   }
 
   esp_now_register_recv_cb(OnDataRecv);
+
+  // Note: Le mode promiscuous ne peut pas être utilisé avec ESP-NOW sur ESP8266
+  // (ils entrent en conflit). Le RSSI sera approximatif via WiFi.RSSI().
 
   // ========== CONFIGURATION ESP-NOW POUR LES ENVOIS ==========
   // Définir le rôle ESP-NOW (nécessaire avant d'ajouter des peers)
@@ -2354,12 +2443,15 @@ void loop()
   if (currentTime - lastStatsTime >= 1000) {
     lastStatsTime = currentTime;
     
-    DEBUG_PRINTLN("========== STATISTIQUES ESP-NOW ==========");
-    DEBUG_PRINTF("Trames totales: %lu | DMX: %lu | OTA: %lu | MAC: %lu | SETUP: %lu | Invalides: %lu\n",
-                  statsTotalPackets, statsDMXPackets, statsOTAPackets, 
-                  statsMACPackets, statsSETUPPackets, statsInvalidPackets);
-    DEBUG_PRINTF("RSSI: %d dBm | Canal WiFi: %d\n", lastRSSI, wifi_get_channel());
-    DEBUG_PRINTLN("==========================================");
+    // Afficher les stats sur le serial uniquement si statsSerialEnabled est activé
+    if (statsSerialEnabled) {
+      DEBUG_PRINTLN("========== STATISTIQUES ESP-NOW ==========");
+      DEBUG_PRINTF("Trames totales: %lu | DMX: %lu | OTA: %lu | MAC: %lu | SETUP: %lu | Invalides: %lu\n",
+                    statsTotalPackets, statsDMXPackets, statsOTAPackets, 
+                    statsMACPackets, statsSETUPPackets, statsInvalidPackets);
+      DEBUG_PRINTF("RSSI: %d dBm | Canal WiFi: %d\n", lastRSSI, wifi_get_channel());
+      DEBUG_PRINTLN("==========================================");
+    }
     
     // Réinitialiser les compteurs pour la prochaine seconde (optionnel)
     // Si vous préférez garder un total cumulé, commentez ces lignes :
@@ -2383,45 +2475,10 @@ void loop()
   handleIdentifyMode();
   // ========== FIN GESTION IDENTIFICATION ==========
 
-  // ========== SURVEILLANCE TIMEOUT ET SCAN AUTOMATIQUE ==========
-  // Vérifier si plus de 2 secondes sans recevoir de paquet
-  if (currentTime - lastPacketTime > 2000 && 
-      !isScanning && 
-      !remoteConfigActive &&
-      !remoteSetupMode) {
-    DEBUG_PRINTLN("Timeout détecté (>2s sans paquet), lancement du scan automatique...");
-    
-    uint8_t newChannel = scanForChannel();
-    if (newChannel > 0) {
-      // Canal trouvé
-      detectedChannel = newChannel;
-      
-      // Réajouter les peers sur le nouveau canal (ESP-NOW est déjà réinitialisé dans scanForChannel)
-      esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_COMBO, detectedChannel, NULL, 0);
-      
-      // Vérifier si senderMacFromScan contient une adresse valide
-      bool validMac = false;
-      for (int i = 0; i < 6; i++) {
-        if (senderMacFromScan[i] != 0x00 && senderMacFromScan[i] != 0xFF) {
-          validMac = true;
-          break;
-        }
-      }
-      if (validMac) {
-        esp_now_add_peer(senderMacFromScan, ESP_NOW_ROLE_COMBO, detectedChannel, NULL, 0);
-      }
-      
-      lastPacketTime = millis(); // Réinitialiser le timeout
-      DEBUG_PRINTF("Scan réussi, canal changé à: %d\n", detectedChannel);
-    } else {
-      // Scan échoué, continuer avec le canal actuel
-      // Le canal original a déjà été restauré dans scanForChannel()
-      DEBUG_PRINTLN("Scan automatique échoué, continuation sur canal actuel");
-      // Réinitialiser partiellement le timeout pour éviter les scans trop fréquents
-      // mais permettre un nouveau scan si vraiment nécessaire
-      lastPacketTime = currentTime - 1500; // Permettre un nouveau scan dans 0.5 seconde si toujours pas de paquet
-    }
-  }
+  // ========== SURVEILLANCE TIMEOUT ==========
+  // Note: Le scan automatique a été supprimé. Le canal est maintenant géré uniquement
+  // par diffusion depuis l'émetteur via SET_CHANNEL_CMD.
+  // On garde juste la mise à jour de lastPacketTime pour les statistiques.
   // ========== FIN SURVEILLANCE TIMEOUT ==========
 
   // ========== PRIORITÉ AU SETUP À DISTANCE ==========
