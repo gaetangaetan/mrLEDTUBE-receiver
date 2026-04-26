@@ -1,10 +1,10 @@
-#define VERSION 70 // numéro de version pour m'y retrouver pendant le développement
-#define VERSION_DATE "2025-11-27" // date de la version
+#define VERSION 73 // numéro de version pour m'y retrouver pendant le développement
+#define VERSION_DATE "2026-04-23" // date « logique » de la version (affichage série ; la date du dashboard = compilation, voir VERSION_TIMESTAMP)
 #define VERSION_TIMESTAMP __DATE__ " " __TIME__  // Timestamp de compilation
 #define BUTTON_PRESENT false
 
 // ========== SYSTÈME DE DÉBOGAGE ==========
-#define DEBUG_ENABLED true // Mettre à false pour désactiver tous les messages de debug
+#define DEBUG_ENABLED false // Démo : réduit le bruit série (remettre true pour debug)
 
 // Macros pour le débogage (remplacent Serial.print/println)
 #if DEBUG_ENABLED
@@ -110,6 +110,9 @@ Le numéro de groupe est enregistré en EEPROM
 #define EXIT_REMOTE_SETUP_CMD 0xFE // Code de commande pour sortir du setup à distance
 #define SET_GROUP_NUMBER_CMD 0xFF // Code de commande pour définir le numéro de groupe
 #define PANIC_RESTART_CMD 0xF9 // Code de commande pour redémarrer tous les récepteurs
+
+// Déclenchement animation (ONIRIGUN / démo) : struct_dmx_packet complet, cmd en data[3], index en data[10]
+#define ANIMATION_TRIGGER_CMD 0xA0
 
 // ========== NOUVELLES COMMANDES (v67+) ==========
 // Requêtes (émetteur -> récepteur)
@@ -233,6 +236,34 @@ int flashInterval;
 uint8_t dmxChannels[512]; // tableau dans lequel seront stockées les valeurs des 512 canaux DMX
                           // les éléments 0 à 511 représentent les valeurs DMX de 1 à 512. Éternelle bataille des gens qui commencent la numérotation à 0 et ceux qui commencent à 1. Perso, je trouve qu'on devrait toujours commencer à 0 mais bon... ;)
 
+// Animations déclenchées par paquet Poulpylights (aligné ONIRIGUN / émetteur démo)
+#define NB_DEMO_ANIMATIONS 10
+static const uint8_t DEMO_ANIM_COLORS[NB_DEMO_ANIMATIONS][3] = {
+    {255, 0, 50}, {255, 0, 0}, {0, 255, 0}, {0, 0, 255}, {255, 255, 0},
+    {0, 255, 255}, {200, 0, 255}, {255, 255, 255}, {128, 0, 255}, {255, 64, 0}};
+
+enum DemoAnimPhase {
+  DEMO_ANIM_IDLE,
+  DEMO_ANIM_FLASH_HOLD,
+  DEMO_ANIM_FADE_OUT,
+  DEMO_ANIM_BLACK_HOLD,
+  DEMO_ANIM_FADE_IN
+};
+volatile uint8_t demoAnimPendingIndex = 255;
+static DemoAnimPhase demoAnimPhase = DEMO_ANIM_IDLE;
+static CRGB demoAnimFlashColor;
+static uint8_t demoRecoverR = 0;
+static uint8_t demoRecoverG = 0;
+static uint8_t demoRecoverB = 0;
+static unsigned long demoAnimPhaseStartMs = 0;
+
+#define DEMO_FLASH_HOLD_MS 80U
+/** Fade ONIRIGUN : moitié de la durée précédente (~2,5 s → ~1,25 s) */
+#define DEMO_FADE_OUT_MS 1250U
+/** Noir complet avant retour à la couleur « normale » */
+#define DEMO_BLACK_HOLD_MS 3500U
+#define DEMO_FADE_IN_MS 1500U
+
 typedef struct struct_dmx_packet // on divise les 512 adresses en 4 blocs de 128 adresses (on ne peut pas tout envoyer en une fois car la taille maximale des packets transmis par ESP-NOW est limitée à 250 bytes)
 {                                
   uint8_t blockNumber;    // numéro du bloc (0..3)
@@ -329,6 +360,114 @@ void displayRemoteConfigPattern() {
     // État éteint : rien à faire (FastLED.clear() déjà appelé)
     
     FastLED.show();
+  }
+}
+
+// --- Couleur « normale » depuis le buffer DMX (mode 0 global ou mode 6 par groupe) ---
+static void getNormalRgbFromDmx(uint8_t *r, uint8_t *g, uint8_t *b) {
+  uint8_t mode = dmxChannels[0];
+  if (mode == 0) {
+    *r = dmxChannels[1];
+    *g = dmxChannels[2];
+    *b = dmxChannels[3];
+    return;
+  }
+  if (mode == 6) {
+    int ir = 3 * setupTubeNumber + 1;
+    int ig = 3 * setupTubeNumber + 2;
+    int ib = 3 * setupTubeNumber + 3;
+    if (ir >= 0 && ir < 512 && ig < 512 && ib < 512) {
+      *r = dmxChannels[ir];
+      *g = dmxChannels[ig];
+      *b = dmxChannels[ib];
+    } else {
+      *r = *g = *b = 0;
+    }
+    return;
+  }
+  if (mode == 12) {
+    *r = dmxChannels[1];
+    *g = dmxChannels[2];
+    *b = dmxChannels[3];
+    return;
+  }
+  *r = dmxChannels[1];
+  *g = dmxChannels[2];
+  *b = dmxChannels[3];
+}
+
+void armAnimationTrigger(uint8_t idx) {
+  if (!etat)
+    return;
+  if (remoteSetupMode)
+    return;
+  if (remoteConfigActive)
+    return;
+  if (idx >= NB_DEMO_ANIMATIONS)
+    idx = NB_DEMO_ANIMATIONS - 1;
+  demoAnimPendingIndex = idx;
+}
+
+void updateDemoAnimation(void) {
+  unsigned long now = millis();
+  unsigned long dt = now - demoAnimPhaseStartMs;
+
+  switch (demoAnimPhase) {
+  case DEMO_ANIM_IDLE:
+    return;
+
+  case DEMO_ANIM_FLASH_HOLD:
+    fill_solid(leds, ledCount, demoAnimFlashColor);
+    FastLED.show();
+    if (dt >= DEMO_FLASH_HOLD_MS) {
+      demoAnimPhase = DEMO_ANIM_FADE_OUT;
+      demoAnimPhaseStartMs = now;
+    }
+    break;
+
+  case DEMO_ANIM_FADE_OUT: {
+    float t = (float)dt / (float)DEMO_FADE_OUT_MS;
+    if (t > 1.0f)
+      t = 1.0f;
+    uint8_t rr = (uint8_t)((float)demoAnimFlashColor.r * (1.0f - t));
+    uint8_t gg = (uint8_t)((float)demoAnimFlashColor.g * (1.0f - t));
+    uint8_t bb = (uint8_t)((float)demoAnimFlashColor.b * (1.0f - t));
+    fill_solid(leds, ledCount, CRGB(rr, gg, bb));
+    FastLED.show();
+    if (t >= 1.0f) {
+      demoAnimPhase = DEMO_ANIM_BLACK_HOLD;
+      demoAnimPhaseStartMs = now;
+    }
+    break;
+  }
+
+  case DEMO_ANIM_BLACK_HOLD:
+    fill_solid(leds, ledCount, CRGB::Black);
+    FastLED.show();
+    if (dt >= DEMO_BLACK_HOLD_MS) {
+      getNormalRgbFromDmx(&demoRecoverR, &demoRecoverG, &demoRecoverB);
+      demoAnimPhase = DEMO_ANIM_FADE_IN;
+      demoAnimPhaseStartMs = now;
+    }
+    break;
+
+  case DEMO_ANIM_FADE_IN: {
+    float t = (float)dt / (float)DEMO_FADE_IN_MS;
+    if (t > 1.0f)
+      t = 1.0f;
+    uint8_t rr = (uint8_t)((float)demoRecoverR * t);
+    uint8_t gg = (uint8_t)((float)demoRecoverG * t);
+    uint8_t bb = (uint8_t)((float)demoRecoverB * t);
+    fill_solid(leds, ledCount, CRGB(rr, gg, bb));
+    FastLED.show();
+    if (t >= 1.0f)
+      demoAnimPhase = DEMO_ANIM_IDLE;
+    break;
+  }
+
+  default:
+    demoAnimPhase = DEMO_ANIM_IDLE;
+    break;
   }
 }
 
@@ -710,9 +849,8 @@ void executeOTAUpdate() {
   // IMPORTANT: Effacer les paramètres OTA AVANT le téléchargement
   // pour éviter la boucle infinie en cas de succès
   clearOTAParams();
-  
-  // URL fixe du firmware
-  const char* firmwareURL = "http://poulpylights.gaetanstreel.com/receiver/firmware.bin";
+
+  const char *firmwareURL = "http://poulpylights.gaetanstreel.com/receiver/firmware.bin";
   
   // Clignotement bleu pendant la connexion WiFi
   FastLED.clear();
@@ -794,11 +932,10 @@ void executeOTAUpdate() {
   }
   FastLED.show();
   
-  // Mise à jour OTA
-  Serial.print("Téléchargement du firmware depuis: ");
-  Serial.println(firmwareURL);
-  
   WiFiClient client;
+  client.setTimeout(60000);
+
+  ESPhttpUpdate.setClientTimeout(60000);
   t_httpUpdate_return result = ESPhttpUpdate.update(client, firmwareURL);
   
   switch (result) {
@@ -1640,6 +1777,13 @@ void OnDataRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len)
         ESP.restart(); // Redémarrage immédiat
         return;
       }
+
+      // Déclenchement animation : ne pas fusionner les blocs DMX (buffer inchangé)
+      if (incomingDMXPacket.data[3] == ANIMATION_TRIGGER_CMD)
+      {
+        armAnimationTrigger(incomingDMXPacket.data[10]);
+        return;
+      }
       
       // ========== NOUVELLES COMMANDES (v67+) ==========
       uint8_t cmdCode = incomingDMXPacket.data[3];
@@ -2175,6 +2319,41 @@ case 11: // "grésillement lumineux" preset 3
 flickering(0,0,255,255,29,31,6,255,255,255);
 break;
 
+  case 12: // Segment RGB : ch2–4 R,G,B ; ch5 longueur (0–255→1..ledCount) ; ch6 décalage origine (0–255→0..ledCount-1)
+  {
+    uint8_t rr = dmxChannels[1];
+    uint8_t gg = dmxChannels[2];
+    uint8_t bb = dmxChannels[3];
+    uint8_t lenDm = dmxChannels[4];
+    uint8_t offDm = dmxChannels[5];
+
+    int start = map((int)offDm, 0, 255, 0, max(0, ledCount - 1));
+    int segLen = map((int)lenDm, 0, 255, 1, ledCount);
+    if (segLen < 1)
+      segLen = 1;
+    if (start < 0)
+      start = 0;
+    if (start >= ledCount)
+      start = ledCount - 1;
+    if (start + segLen > ledCount)
+      segLen = ledCount - start;
+
+    for (int j = 0; j < ledCount; j++) {
+      leds[j].r = 0;
+      leds[j].g = 0;
+      leds[j].b = 0;
+    }
+    for (int k = 0; k < segLen; k++) {
+      int idx = start + k;
+      if (idx >= 0 && idx < ledCount) {
+        leds[idx].r = rr;
+        leds[idx].g = gg;
+        leds[idx].b = bb;
+      }
+    }
+    break;
+  }
+
 
   case 255: // affichage du numéro de groupe
     for (int j = 0; j < setupTubeNumber; j++)
@@ -2499,7 +2678,19 @@ void loop()
 
   if (etat == RUNNING)
   {
-    DMX2LEDSTRIP(); // on met à jour l'affichage du ledstrip
+    if (demoAnimPendingIndex != 255) {
+      uint8_t ix = demoAnimPendingIndex;
+      demoAnimPendingIndex = 255;
+      demoAnimFlashColor =
+          CRGB(DEMO_ANIM_COLORS[ix][0], DEMO_ANIM_COLORS[ix][1], DEMO_ANIM_COLORS[ix][2]);
+      demoAnimPhase = DEMO_ANIM_FLASH_HOLD;
+      demoAnimPhaseStartMs = millis();
+    }
+
+    if (demoAnimPhase != DEMO_ANIM_IDLE)
+      updateDemoAnimation();
+    else
+      DMX2LEDSTRIP(); // on met à jour l'affichage du ledstrip
   }
   else // etat==SETUP -> on fait clignoter un nombre de LEDs correspondant au groupe du tube
   {
